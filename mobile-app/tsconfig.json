@@ -7,5 +7,6 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true
-  }
+  },
+  "extends": "expo/tsconfig.base"
 }
