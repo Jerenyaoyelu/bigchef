@@ -16,6 +16,7 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
   const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RecommendResponse | null>(null);
+  const [searched, setSearched] = useState(false);
   const [sortMode, setSortMode] = useState<"match" | "missing" | "time">("match");
   const commonIngredients = ["鸡蛋", "西红柿", "土豆", "鸡肉", "猪肉", "牛肉", "白菜", "豆腐", "葱", "姜", "蒜", "青椒"];
 
@@ -63,6 +64,7 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
   async function onSubmit() {
     if (!ingredients.length) return;
     setLoading(true);
+    setSearched(true);
     onError("");
     try {
       track("recommend_search_submitted", { ingredients });
@@ -133,10 +135,17 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
         </Pressable>
       </View>
 
-      {!result?.list?.length && (
+      {!searched && !result?.list?.length && (
         <View style={styles.tipCard}>
           <Text style={styles.tipTitle}>💡 小提示</Text>
           <Text style={styles.tipDesc}>添加你现有的食材，可以手动输入或点击下方常用食材。我们会为你推荐最匹配的菜谱！</Text>
+        </View>
+      )}
+
+      {searched && !loading && result?.total === 0 && (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>暂无匹配菜谱</Text>
+          <Text style={styles.emptyDesc}>当前食材没有匹配结果，后续版本会支持 AI 生成新菜谱。</Text>
         </View>
       )}
 
@@ -284,6 +293,17 @@ const styles = StyleSheet.create({
   },
   tipTitle: { color: "#ff6b35", fontSize: 14, fontWeight: "500" },
   tipDesc: { color: "#ff6b35", fontSize: 14, lineHeight: 22, opacity: 0.85 },
+  emptyCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 6,
+  },
+  emptyTitle: { color: "#1a1a1a", fontSize: 16, fontWeight: "600" },
+  emptyDesc: { color: "#757575", fontSize: 14, lineHeight: 22 },
   resultSection: { gap: 10 },
   resultCount: { color: "#757575", fontSize: 14 },
   sortRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

@@ -24,6 +24,8 @@ export type RecommendResponse = {
 export type DishResponse = {
   dishId: string;
   dishName: string;
+  cookTimeMinutes?: number;
+  difficulty?: number;
   ingredients: {
     main: string[];
     secondary: string[];
@@ -31,5 +33,40 @@ export type DishResponse = {
   };
   stepsSummary: string[];
   videos: VideoItem[];
+};
+
+export type FavoriteItem = {
+  dishId: string;
+  dishName: string;
+  createdAt?: string;
+};
+
+export type HistoryItem = {
+  dishId: string;
+  dishName: string;
+  viewedAt: string;
+  difficulty?: number;
+};
+
+export type FavoritesResponse = {
+  list: FavoriteItem[];
+  total: number;
+};
+
+export type HistoryResponse = {
+  list: HistoryItem[];
+  total: number;
+};
+
+export type PopularDishItem = {
+  dishId: string;
+  dishName: string;
+  cookTimeMinutes?: number;
+  difficulty?: number;
+};
+
+export type PopularDishesResponse = {
+  list: PopularDishItem[];
+  total: number;
 };
 

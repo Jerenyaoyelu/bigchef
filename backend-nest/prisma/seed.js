@@ -3,6 +3,8 @@ const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
 async function main() {
+  await prisma.userHistory.deleteMany();
+  await prisma.userFavorite.deleteMany();
   await prisma.video.deleteMany();
   await prisma.dishIngredient.deleteMany();
   await prisma.ingredient.deleteMany();

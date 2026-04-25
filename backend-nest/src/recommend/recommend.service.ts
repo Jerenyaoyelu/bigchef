@@ -5,7 +5,7 @@ import { PrismaService } from "../database/prisma.service";
 export class RecommendService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async byIngredients(ingredients: string[]) {
+  async byIngredients(ingredients: string[], page = 1, pageSize = 10) {
     const normalized = new Set(
       ingredients.map((item) => item.trim()).filter(Boolean).map((item) => (item === "番茄" ? "西红柿" : item)),
     );
@@ -23,11 +23,12 @@ export class RecommendService {
         const mainIngredients = dish.ingredients
           .filter((item) => item.role === "main")
           .map((item) => item.ingredient.name);
+        const missingIngredients = mainIngredients.filter((item) => !normalized.has(item));
         return {
           dishId: dish.id,
           dishName: dish.name,
           requiredMain: mainIngredients,
-          missingIngredients: [],
+          missingIngredients,
           cookTimeMinutes: dish.cookTimeMinutes ?? 20,
           difficulty: dish.difficulty ?? 2,
           videos: dish.videos.map((video) => ({
@@ -40,7 +41,7 @@ export class RecommendService {
         };
       });
 
-      return this.computeMatches(fromDb, normalized);
+      return this.computeMatches(fromDb, normalized, page, pageSize);
     } catch {
       throw new ServiceUnavailableException("数据库服务暂时不可用，请稍后重试。");
     }
@@ -63,8 +64,10 @@ export class RecommendService {
       }>;
     }>,
     normalized: Set<string>,
+    page: number,
+    pageSize: number,
   ) {
-    const list = dishes
+    const matched = dishes
       .filter((dish) => dish.requiredMain.length > 0)
       .map((dish) => {
         const hit = dish.requiredMain.filter((item) => normalized.has(item)).length;
@@ -75,6 +78,10 @@ export class RecommendService {
       .sort((a, b) => b.matchScore - a.matchScore)
       .map(({ requiredMain, ...rest }) => rest);
 
-    return { list, total: list.length };
+    const safePage = Math.max(1, page);
+    const safePageSize = Math.max(1, pageSize);
+    const start = (safePage - 1) * safePageSize;
+    const list = matched.slice(start, start + safePageSize);
+    return { list, total: matched.length, page: safePage, pageSize: safePageSize };
   }
 }

@@ -1,28 +1,75 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { track } from "../../../analytics/tracker";
 import { DishResponse } from "../../../types/api";
-import { fetchDishByName } from "../api/dishApi";
+import { fetchDishById, fetchDishByName, fetchPopularDishes } from "../api/dishApi";
 
 type DishSectionProps = {
   onError: (message: string) => void;
   favoriteDishIds: string[];
   onToggleFavorite: (dish: { dishId: string; dishName: string }) => void;
   onOpenDish: (dish: { dishId: string; dishName: string }) => void;
+  focusDishId?: string | null;
 };
 
-export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish }: DishSectionProps) {
+export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish, focusDishId }: DishSectionProps) {
   const [dishName, setDishName] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DishResponse | null>(null);
+  const [isEmptyResult, setIsEmptyResult] = useState(false);
   const [stepMode, setStepMode] = useState<"all" | "single">("all");
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const popularDishes = ["可乐鸡翅", "西红柿炒鸡蛋", "宫保鸡丁", "红烧肉"];
+  const [popularDishes, setPopularDishes] = useState<string[]>(["可乐鸡翅", "西红柿炒鸡蛋", "宫保鸡丁", "红烧肉"]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await fetchPopularDishes();
+        if (data.list.length) {
+          setPopularDishes(data.list.map((item) => item.dishName));
+        }
+      } catch {
+        setPopularDishes([]);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!focusDishId) return;
+    void (async () => {
+      setLoading(true);
+      onError("");
+      setIsEmptyResult(false);
+      try {
+        const data = await fetchDishById(focusDishId);
+        setResult(data);
+        setDishName(data.dishName);
+        setCurrentStepIndex(0);
+        setStepMode("all");
+      } catch (error) {
+        if ((error as Error).message.includes("HTTP 404")) {
+          setResult(null);
+          setIsEmptyResult(true);
+          return;
+        }
+        onError(`菜谱加载失败: ${(error as Error).message}`);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [focusDishId, onError]);
+
+  function difficultyLabel(level?: number) {
+    if (!level || level <= 1) return "简单";
+    if (level <= 3) return "中等";
+    return "较难";
+  }
 
   async function onSubmit() {
     if (!dishName.trim()) return;
     setLoading(true);
     onError("");
+    setIsEmptyResult(false);
     try {
       track("dish_search_submitted", { dishName });
       const data = await fetchDishByName(dishName);
@@ -32,7 +79,12 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
       onOpenDish({ dishId: data.dishId, dishName: data.dishName });
       track("dish_result_loaded", { dishId: data.dishId, hasVideos: data.videos.length > 0 });
     } catch (error) {
-      onError(`菜谱查询失败: ${(error as Error).message}`);
+      setResult(null);
+      if ((error as Error).message.includes("HTTP 404")) {
+        setIsEmptyResult(true);
+      } else {
+        onError(`菜谱查询失败: ${(error as Error).message}`);
+      }
       track("dish_search_failed", { message: (error as Error).message });
     } finally {
       setLoading(false);
@@ -78,13 +130,22 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
         </View>
       )}
 
+      {isEmptyResult && (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyTitle}>暂未收录该菜谱</Text>
+          <Text style={styles.emptyDesc}>当前版本仅展示已入库菜谱，后续会接入 AI 自动生成并入库。</Text>
+        </View>
+      )}
+
       {result && (
         <View style={styles.resultWrap}>
           <View style={styles.infoCard}>
             <View style={styles.resultHead}>
               <View>
                 <Text style={styles.resultTitle}>{result.dishName}</Text>
-                <Text style={styles.resultMeta}>⏱️ 35分钟   👨‍🍳 简单</Text>
+                <Text style={styles.resultMeta}>
+                  ⏱️ {result.cookTimeMinutes ?? 20}分钟   👨‍🍳 {difficultyLabel(result.difficulty)}
+                </Text>
               </View>
               <Pressable onPress={() => onToggleFavorite({ dishId: result.dishId, dishName: result.dishName })} hitSlop={6}>
                 <Text style={[styles.favoriteText, favoriteDishIds.includes(result.dishId) && styles.favoriteTextActive]}>
@@ -256,6 +317,17 @@ const styles = StyleSheet.create({
   popularRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   popularChip: { backgroundColor: "#4ecdc4", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
   popularChipText: { color: "#fff", fontSize: 12, fontWeight: "500" },
+  emptyCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 6,
+  },
+  emptyTitle: { color: "#1a1a1a", fontSize: 16, fontWeight: "600" },
+  emptyDesc: { color: "#757575", fontSize: 14, lineHeight: 22 },
   resultWrap: { gap: 12 },
   infoCard: {
     backgroundColor: "#fff",

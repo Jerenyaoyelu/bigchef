@@ -16,6 +16,8 @@ model Dish {
   stepsSummary    Json             @default("[]")
   ingredients     DishIngredient[]
   videos          Video[]
+  favorites       UserFavorite[]
+  viewHistories   UserHistory[]
 }
 
 model Ingredient {
@@ -46,4 +48,27 @@ model Video {
   durationSec    Int?
   likeCount      Int?
   dish           Dish     @relation(fields: [dishId], references: [id])
+}
+
+model UserFavorite {
+  id         String   @id @default(cuid())
+  userId     String
+  dishId     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  dish       Dish     @relation(fields: [dishId], references: [id])
+
+  @@unique([userId, dishId])
+  @@index([userId, createdAt])
+}
+
+model UserHistory {
+  id         String   @id @default(cuid())
+  userId     String
+  dishId     String
+  viewedAt   DateTime @default(now()) @updatedAt
+  dish       Dish     @relation(fields: [dishId], references: [id])
+
+  @@index([userId, viewedAt])
+  @@unique([userId, dishId])
 }

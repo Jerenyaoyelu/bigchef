@@ -1,5 +1,5 @@
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import { DishSection } from "../features/dish/components/DishSection";
 import { RecommendSection } from "../features/recommend/components/RecommendSection";
@@ -10,12 +10,18 @@ type TabKey = "recommend" | "dish" | "profile";
 export function HomeScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>("recommend");
   const [errorMessage, setErrorMessage] = useState("");
+  const [focusDishId, setFocusDishId] = useState<string | null>(null);
   const favorites = useUserFoodStore((s) => s.favorites) ?? [];
   const recentViews = useUserFoodStore((s) => s.recentViews) ?? [];
   const toggleFavorite = useUserFoodStore((s) => s.toggleFavorite);
   const addRecentView = useUserFoodStore((s) => s.addRecentView);
   const clearRecentViews = useUserFoodStore((s) => s.clearRecentViews);
+  const hydrateFromServer = useUserFoodStore((s) => s.hydrateFromServer);
   const favoriteDishIds = favorites.map((item) => item.dishId);
+
+  useEffect(() => {
+    void hydrateFromServer();
+  }, [hydrateFromServer]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -36,6 +42,7 @@ export function HomeScreen() {
               favoriteDishIds={favoriteDishIds}
               onToggleFavorite={toggleFavorite}
               onOpenDish={addRecentView}
+              focusDishId={focusDishId}
             />
           )}
           {activeTab === "profile" && (
@@ -74,12 +81,19 @@ export function HomeScreen() {
                 ) : (
                   <View style={styles.favoritesList}>
                     {favorites.map((item) => (
-                      <View key={item.dishId} style={styles.favoriteCard}>
+                      <Pressable
+                        key={item.dishId}
+                        style={styles.favoriteCard}
+                        onPress={() => {
+                          setFocusDishId(item.dishId);
+                          setActiveTab("dish");
+                        }}
+                      >
                         <Text style={styles.favoriteName}>{item.dishName}</Text>
                         <Pressable style={styles.favoriteRemove} onPress={() => toggleFavorite(item)}>
                           <Text style={styles.favoriteRemoveText}>移除</Text>
                         </Pressable>
-                      </View>
+                      </Pressable>
                     ))}
                   </View>
                 )}
@@ -98,15 +112,22 @@ export function HomeScreen() {
                 {!!recentViews.length && (
                   <View style={styles.historyList}>
                     {recentViews.map((item) => (
-                      <View key={`${item.dishId}-${item.viewedAt}`} style={styles.historyCard}>
+                      <Pressable
+                        key={`${item.dishId}-${item.viewedAt}`}
+                        style={styles.historyCard}
+                        onPress={() => {
+                          setFocusDishId(item.dishId);
+                          setActiveTab("dish");
+                        }}
+                      >
                         <View style={styles.historyMain}>
                           <Text style={styles.historyDish}>{item.dishName}</Text>
                           <Text style={styles.historyTime}>◷ {formatRelativeMinutes(item.viewedAt)}</Text>
                         </View>
                         <View style={styles.historyTag}>
-                          <Text style={styles.historyTagText}>简单</Text>
+                          <Text style={styles.historyTagText}>{difficultyLabel(item.difficulty)}</Text>
                         </View>
-                      </View>
+                      </Pressable>
                     ))}
                   </View>
                 )}
@@ -161,6 +182,12 @@ function formatRelativeMinutes(iso: string) {
   if (hour < 24) return `${hour}小时前`;
   const day = Math.floor(hour / 24);
   return `${day}天前`;
+}
+
+function difficultyLabel(level?: number) {
+  if (!level || level <= 1) return "简单";
+  if (level <= 3) return "中等";
+  return "较难";
 }
 
 const styles = StyleSheet.create({
