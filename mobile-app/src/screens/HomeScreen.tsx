@@ -1,10 +1,8 @@
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
-import { APP_CONFIG } from "../config/env";
 import { DishSection } from "../features/dish/components/DishSection";
 import { RecommendSection } from "../features/recommend/components/RecommendSection";
-import { useAppConfigStore } from "../store/appConfigStore";
 import { useUserFoodStore } from "../store/userFoodStore";
 
 type TabKey = "recommend" | "dish" | "profile";
@@ -12,7 +10,6 @@ type TabKey = "recommend" | "dish" | "profile";
 export function HomeScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>("recommend");
   const [errorMessage, setErrorMessage] = useState("");
-  const apiBaseUrl = useAppConfigStore((s) => s.apiBaseUrl);
   const favorites = useUserFoodStore((s) => s.favorites) ?? [];
   const recentViews = useUserFoodStore((s) => s.recentViews) ?? [];
   const toggleFavorite = useUserFoodStore((s) => s.toggleFavorite);
@@ -22,67 +19,117 @@ export function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.heroCard}>
-          <Text style={styles.heroTitle}>今天吃什么？</Text>
-          <Text style={styles.heroSubtitle}>用现有食材找菜，或直接搜菜名获取步骤，降低每天做饭决策成本。</Text>
-          <View style={styles.heroMetaWrap}>
-            <Text style={styles.heroMeta}>API: {apiBaseUrl}</Text>
-            {!APP_CONFIG.isDev && <Text style={styles.heroMeta}>当前非开发环境，地址由构建变量注入</Text>}
-          </View>
-        </View>
-        <View style={styles.tabRow}>
-          <TabButton label="推荐" active={activeTab === "recommend"} onPress={() => setActiveTab("recommend")} />
-          <TabButton label="查菜" active={activeTab === "dish"} onPress={() => setActiveTab("dish")} />
-          <TabButton label="我的" active={activeTab === "profile"} onPress={() => setActiveTab("profile")} />
-        </View>
-        {!!errorMessage && <Text style={styles.error}>{errorMessage}</Text>}
-        {activeTab === "recommend" && (
-          <RecommendSection
-            onError={setErrorMessage}
-            favoriteDishIds={favoriteDishIds}
-            onToggleFavorite={toggleFavorite}
-            onOpenDish={addRecentView}
-          />
-        )}
-        {activeTab === "dish" && (
-          <DishSection
-            onError={setErrorMessage}
-            favoriteDishIds={favoriteDishIds}
-            onToggleFavorite={toggleFavorite}
-            onOpenDish={addRecentView}
-          />
-        )}
-        {activeTab === "profile" && (
-          <View style={styles.profileCard}>
-            <Text style={styles.profileTitle}>我的菜谱空间</Text>
-            <Text style={styles.profileSubtitle}>收藏 {favorites.length} 道菜，最近浏览 {recentViews.length} 条记录</Text>
-            <Text style={styles.groupTitle}>收藏菜谱</Text>
-            {!favorites.length && <Text style={styles.emptyText}>还没有收藏，去推荐页或查菜页收藏你喜欢的菜吧。</Text>}
-            {favorites.map((item) => (
-              <View key={item.dishId} style={styles.listItem}>
-                <Text style={styles.listText}>{item.dishName}</Text>
-                <Pressable style={styles.listAction} onPress={() => toggleFavorite(item)}>
-                  <Text style={styles.listActionText}>移除</Text>
-                </Pressable>
+      <View style={styles.main}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {!!errorMessage && <Text style={styles.error}>{errorMessage}</Text>}
+          {activeTab === "recommend" && (
+            <RecommendSection
+              onError={setErrorMessage}
+              favoriteDishIds={favoriteDishIds}
+              onToggleFavorite={toggleFavorite}
+              onOpenDish={addRecentView}
+            />
+          )}
+          {activeTab === "dish" && (
+            <DishSection
+              onError={setErrorMessage}
+              favoriteDishIds={favoriteDishIds}
+              onToggleFavorite={toggleFavorite}
+              onOpenDish={addRecentView}
+            />
+          )}
+          {activeTab === "profile" && (
+            <View style={styles.profilePage}>
+              <View style={styles.profileHeader}>
+                <Text style={styles.profileTitle}>我的</Text>
+                <Text style={styles.profileSubtitle}>管理你的收藏和浏览历史</Text>
               </View>
-            ))}
-            <Text style={styles.groupTitle}>最近浏览</Text>
-            {!recentViews.length && <Text style={styles.emptyText}>还没有浏览记录，查一次菜谱就会出现在这里。</Text>}
-            {recentViews.map((item) => (
-              <View key={`${item.dishId}-${item.viewedAt}`} style={styles.listItem}>
-                <Text style={styles.listText}>{item.dishName}</Text>
-                <Text style={styles.timeText}>{new Date(item.viewedAt).toLocaleString()}</Text>
+
+              <View style={styles.statsRow}>
+                <View style={[styles.statsCard, styles.statsCardFavorite]}>
+                  <Text style={styles.statsIcon}>♡</Text>
+                  <Text style={styles.statsNumber}>{favorites.length}</Text>
+                  <Text style={styles.statsLabel}>收藏菜谱</Text>
+                </View>
+                <View style={[styles.statsCard, styles.statsCardHistory]}>
+                  <Text style={styles.statsIcon}>🕒</Text>
+                  <Text style={styles.statsNumber}>{recentViews.length}</Text>
+                  <Text style={styles.statsLabel}>浏览历史</Text>
+                </View>
               </View>
-            ))}
-            {!!recentViews.length && (
-              <Pressable style={styles.clearButton} onPress={clearRecentViews}>
-                <Text style={styles.clearButtonText}>清空最近浏览</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
-      </ScrollView>
+
+              <View style={styles.sectionWrap}>
+                <Text style={styles.sectionTitle}>我的收藏</Text>
+                {!favorites.length ? (
+                  <View style={styles.favoriteEmptyWrap}>
+                    <View style={styles.favoriteEmptyIconWrap}>
+                      <Text style={styles.favoriteEmptyIcon}>♡</Text>
+                    </View>
+                    <Text style={styles.favoriteEmptyTitle}>还没有收藏</Text>
+                    <Text style={styles.favoriteEmptyDesc}>去推荐页或查菜页收藏喜欢的菜谱吧</Text>
+                    <Pressable style={styles.goRecommendButton} onPress={() => setActiveTab("recommend")}>
+                      <Text style={styles.goRecommendText}>去推荐页</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.favoritesList}>
+                    {favorites.map((item) => (
+                      <View key={item.dishId} style={styles.favoriteCard}>
+                        <Text style={styles.favoriteName}>{item.dishName}</Text>
+                        <Pressable style={styles.favoriteRemove} onPress={() => toggleFavorite(item)}>
+                          <Text style={styles.favoriteRemoveText}>移除</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.sectionWrap}>
+                <View style={styles.historyHeader}>
+                  <Text style={styles.sectionTitle}>浏览历史</Text>
+                  {!!recentViews.length && (
+                    <Pressable onPress={clearRecentViews}>
+                      <Text style={styles.clearText}>清空历史</Text>
+                    </Pressable>
+                  )}
+                </View>
+                {!recentViews.length && <Text style={styles.emptyHistoryText}>暂无浏览记录</Text>}
+                {!!recentViews.length && (
+                  <View style={styles.historyList}>
+                    {recentViews.map((item) => (
+                      <View key={`${item.dishId}-${item.viewedAt}`} style={styles.historyCard}>
+                        <View style={styles.historyMain}>
+                          <Text style={styles.historyDish}>{item.dishName}</Text>
+                          <Text style={styles.historyTime}>◷ {formatRelativeMinutes(item.viewedAt)}</Text>
+                        </View>
+                        <View style={styles.historyTag}>
+                          <Text style={styles.historyTagText}>简单</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.tipCard}>
+                <View style={styles.tipIconWrap}>
+                  <Text style={styles.tipIcon}>🍳</Text>
+                </View>
+                <View style={styles.tipContent}>
+                  <Text style={styles.tipTitle}>烹饪小贴士</Text>
+                  <Text style={styles.tipDesc}>收藏你喜欢的菜谱，随时查看详细步骤，让做饭变得更简单！</Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+        <View style={styles.bottomTabBar}>
+          <TabButton label="推荐" icon="🍳" active={activeTab === "recommend"} onPress={() => setActiveTab("recommend")} />
+          <TabButton label="查菜" icon="🔍" active={activeTab === "dish"} onPress={() => setActiveTab("dish")} />
+          <TabButton label="我的" icon="👤" active={activeTab === "profile"} onPress={() => setActiveTab("profile")} />
+        </View>
+      </View>
       <StatusBar style="auto" />
     </SafeAreaView>
   );
@@ -90,49 +137,63 @@ export function HomeScreen() {
 
 type TabButtonProps = {
   label: string;
+  icon: string;
   active: boolean;
   onPress: () => void;
 };
 
-function TabButton({ label, active, onPress }: TabButtonProps) {
+function TabButton({ label, icon, active, onPress }: TabButtonProps) {
   return (
-    <Pressable style={[styles.tabButton, active && styles.tabButtonActive]} onPress={onPress}>
+    <Pressable style={styles.tabButton} onPress={onPress}>
+      <View style={[styles.tabIconWrap, active && styles.tabIconWrapActive]}>
+        <Text style={[styles.tabIcon, active && styles.tabIconActive]}>{icon}</Text>
+      </View>
       <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
     </Pressable>
   );
 }
 
+function formatRelativeMinutes(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const minute = Math.max(1, Math.floor(diff / 60000));
+  if (minute < 60) return `${minute}分钟前`;
+  const hour = Math.floor(minute / 60);
+  if (hour < 24) return `${hour}小时前`;
+  const day = Math.floor(hour / 24);
+  return `${day}天前`;
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f6fb" },
-  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28, gap: 12 },
-  heroCard: {
-    backgroundColor: "#1f6feb",
-    borderRadius: 18,
+  container: { flex: 1, backgroundColor: "#fafafa" },
+  main: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24, gap: 12 },
+  bottomTabBar: {
+    height: 66,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "#fff",
+    flexDirection: "row",
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 8,
-    shadowColor: "#1f6feb",
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    paddingTop: 6,
+    paddingBottom: 4,
   },
-  heroTitle: { fontSize: 24, fontWeight: "800", color: "#ffffff" },
-  heroSubtitle: { fontSize: 13, color: "#dbeafe", lineHeight: 20 },
-  heroMetaWrap: { marginTop: 4, gap: 2 },
-  heroMeta: { fontSize: 11, color: "#dbeafe" },
-  tabRow: { flexDirection: "row", gap: 8 },
   tabButton: {
     flex: 1,
-    backgroundColor: "#e9eef6",
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
+    gap: 1,
   },
-  tabButtonActive: { backgroundColor: "#1f6feb" },
-  tabText: { fontSize: 13, fontWeight: "600", color: "#47607f" },
-  tabTextActive: { color: "#ffffff" },
+  tabIconWrap: {
+    borderRadius: 16,
+    paddingHorizontal: 9,
+    paddingVertical: 2,
+  },
+  tabIconWrapActive: { backgroundColor: "rgba(255,107,53,0.1)" },
+  tabIcon: { fontSize: 20, opacity: 0.55 },
+  tabIconActive: { opacity: 1 },
+  tabText: { fontSize: 12, color: "#757575" },
+  tabTextActive: { color: "#ff6b35" },
   error: {
     color: "#b91c1c",
     fontSize: 12,
@@ -141,49 +202,114 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
-  profileCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: "#e8edf3",
+  profilePage: {
     gap: 10,
   },
-  profileTitle: { fontSize: 18, fontWeight: "800", color: "#13233a" },
-  profileSubtitle: { fontSize: 12, color: "#5f6f82" },
-  groupTitle: { fontSize: 13, fontWeight: "700", color: "#334155", marginTop: 4 },
-  emptyText: { fontSize: 12, color: "#738396" },
-  listItem: {
-    backgroundColor: "#f8fbff",
-    borderRadius: 10,
+  profileHeader: { gap: 5, marginBottom: 2 },
+  profileTitle: { fontSize: 36 / 1.5, color: "#1a1a1a", fontWeight: "600" },
+  profileSubtitle: { fontSize: 16, color: "#757575" },
+  statsRow: { flexDirection: "row", gap: 10 },
+  statsCard: {
+    flex: 1,
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    minHeight: 128,
+    justifyContent: "space-between",
+  },
+  statsCardFavorite: { backgroundColor: "#ff6b35" },
+  statsCardHistory: { backgroundColor: "#4ecdc4" },
+  statsIcon: { fontSize: 28, color: "#fff" },
+  statsNumber: { fontSize: 40 / 1.5, color: "#fff", marginTop: 2 },
+  statsLabel: { fontSize: 14, color: "rgba(255,255,255,0.85)" },
+  sectionWrap: { marginTop: 8, gap: 10 },
+  sectionTitle: { fontSize: 27 / 1.5, color: "#1a1a1a", fontWeight: "600" },
+  favoriteEmptyWrap: {
+    alignItems: "center",
+    paddingVertical: 14,
+    gap: 10,
+  },
+  favoriteEmptyIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 999,
+    backgroundColor: "#f5f5f5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  favoriteEmptyIcon: { fontSize: 40 / 1.5, color: "#757575" },
+  favoriteEmptyTitle: { fontSize: 18, color: "#1a1a1a", fontWeight: "600" },
+  favoriteEmptyDesc: { fontSize: 14, color: "#757575" },
+  goRecommendButton: {
+    backgroundColor: "#ff6b35",
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+  },
+  goRecommendText: { color: "#fff", fontSize: 16, fontWeight: "500" },
+  favoritesList: { gap: 10 },
+  favoriteCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#dde7f3",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 8,
   },
-  listText: { fontSize: 13, color: "#1e293b", flex: 1, fontWeight: "600" },
-  timeText: { fontSize: 11, color: "#64748b" },
-  listAction: {
+  favoriteName: { fontSize: 16, color: "#1a1a1a", fontWeight: "500", flex: 1 },
+  favoriteRemove: {
+    backgroundColor: "#f5f5f5",
+    borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: "#eaf2ff",
   },
-  listActionText: { color: "#174ea6", fontSize: 11, fontWeight: "700" },
-  clearButton: {
-    marginTop: 2,
-    borderRadius: 10,
+  favoriteRemoveText: { color: "#757575", fontSize: 12 },
+  historyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  clearText: { color: "#ff6b6b", fontSize: 14, fontWeight: "500" },
+  emptyHistoryText: { color: "#9ca3af", fontSize: 13 },
+  historyList: { gap: 10 },
+  historyCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#f1b9b9",
-    backgroundColor: "#fff5f5",
-    alignItems: "center",
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 14,
     paddingVertical: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
   },
-  clearButtonText: { color: "#b42318", fontSize: 12, fontWeight: "700" },
+  historyMain: { gap: 4, flex: 1 },
+  historyDish: { color: "#1a1a1a", fontSize: 16, fontWeight: "500" },
+  historyTime: { color: "#757575", fontSize: 12 },
+  historyTag: { backgroundColor: "#f5f5f5", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 },
+  historyTagText: { color: "#757575", fontSize: 12 },
+  tipCard: {
+    marginTop: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,184,77,0.25)",
+    backgroundColor: "#fff3e0",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+  },
+  tipIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 999,
+    backgroundColor: "#ff6b35",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tipIcon: { fontSize: 20, color: "#fff" },
+  tipContent: { flex: 1, gap: 3 },
+  tipTitle: { color: "#ff6b35", fontSize: 22 / 1.5, fontWeight: "600" },
+  tipDesc: { color: "rgba(255,107,53,0.9)", fontSize: 14, lineHeight: 22 },
 });
 
