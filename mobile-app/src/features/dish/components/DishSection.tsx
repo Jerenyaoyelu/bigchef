@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { track } from "../../../analytics/tracker";
 import { DishResponse } from "../../../types/api";
 import { fetchDishById, fetchDishByName, fetchPopularDishes } from "../api/dishApi";
+import { CookingStepsCard } from "./CookingStepsCard";
+import { VideoTutorialCard } from "./VideoTutorialCard";
 
 type DishSectionProps = {
   onError: (message: string) => void;
@@ -17,9 +19,8 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DishResponse | null>(null);
   const [isEmptyResult, setIsEmptyResult] = useState(false);
-  const [stepMode, setStepMode] = useState<"all" | "single">("all");
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [popularDishes, setPopularDishes] = useState<string[]>(["可乐鸡翅", "西红柿炒鸡蛋", "宫保鸡丁", "红烧肉"]);
+  const [videoRequestStateByDish, setVideoRequestStateByDish] = useState<Record<string, "idle" | "requested">>({});
 
   useEffect(() => {
     void (async () => {
@@ -44,8 +45,6 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
         const data = await fetchDishById(focusDishId);
         setResult(data);
         setDishName(data.dishName);
-        setCurrentStepIndex(0);
-        setStepMode("all");
       } catch (error) {
         if ((error as Error).message.includes("HTTP 404")) {
           setResult(null);
@@ -74,8 +73,6 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
       track("dish_search_submitted", { dishName });
       const data = await fetchDishByName(dishName);
       setResult(data);
-      setCurrentStepIndex(0);
-      setStepMode("all");
       onOpenDish({ dishId: data.dishId, dishName: data.dishName });
       track("dish_result_loaded", { dishId: data.dishId, hasVideos: data.videos.length > 0 });
     } catch (error) {
@@ -143,9 +140,10 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
             <View style={styles.resultHead}>
               <View>
                 <Text style={styles.resultTitle}>{result.dishName}</Text>
-                <Text style={styles.resultMeta}>
-                  ⏱️ {result.cookTimeMinutes ?? 20}分钟   👨‍🍳 {difficultyLabel(result.difficulty)}
-                </Text>
+                <View style={styles.resultMetaRow}>
+                  <Text style={styles.resultMetaItem}>◷ {result.cookTimeMinutes ?? 20}分钟</Text>
+                  <Text style={styles.resultMetaItem}>👨‍🍳 {difficultyLabel(result.difficulty)}</Text>
+                </View>
               </View>
               <Pressable onPress={() => onToggleFavorite({ dishId: result.dishId, dishName: result.dishName })} hitSlop={6}>
                 <Text style={[styles.favoriteText, favoriteDishIds.includes(result.dishId) && styles.favoriteTextActive]}>
@@ -153,67 +151,23 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
                 </Text>
               </Pressable>
             </View>
-            {!!result.videos.length && (
-              <Pressable style={styles.videoButton} onPress={() => track("dish_video_clicked", { dishId: result.dishId, url: result.videos[0].url })}>
-                <Text style={styles.videoButtonText}>▷ 观看视频教程</Text>
-              </Pressable>
-            )}
           </View>
+
+          <VideoTutorialCard
+            hasVideo={result.videos.length > 0}
+            requestState={videoRequestStateByDish[result.dishId] ?? "idle"}
+            onWatchVideo={() => {
+              if (!result.videos.length) return;
+              track("dish_video_clicked", { dishId: result.dishId, url: result.videos[0].url });
+            }}
+            onRequestVideo={() => {
+              setVideoRequestStateByDish((prev) => ({ ...prev, [result.dishId]: "requested" }));
+              track("video_request_update_click", { dishId: result.dishId, source: "dish_detail" });
+            }}
+          />
 
           <IngredientCard title="所需食材" sections={result.ingredients} />
-
-          <View style={styles.stepCard}>
-            <View style={styles.stepHeader}>
-              <Text style={styles.stepTitle}>烹饪步骤</Text>
-              <Pressable style={styles.modeToggleButton} onPress={() => setStepMode((prev) => (prev === "all" ? "single" : "all"))}>
-                <Text style={styles.modeToggleText}>{stepMode === "all" ? "☰ 逐步模式" : "☰ 全部步骤"}</Text>
-              </Pressable>
-            </View>
-
-            {stepMode === "all" &&
-              result.stepsSummary.map((step, idx) => (
-                <View key={`${result.dishId}-${idx}`} style={styles.stepItem}>
-                  <View style={styles.stepIndex}>
-                    <Text style={styles.stepIndexText}>{idx + 1}</Text>
-                  </View>
-                  <Text style={styles.stepText}>{step}</Text>
-                </View>
-              ))}
-
-            {stepMode === "single" && !!result.stepsSummary.length && (
-              <View style={styles.singleWrap}>
-                <Text style={styles.singleProgress}>第 {currentStepIndex + 1} / {result.stepsSummary.length} 步</Text>
-                <View style={styles.singleContent}>
-                  <View style={styles.singleIndex}>
-                    <Text style={styles.singleIndexText}>{currentStepIndex + 1}</Text>
-                  </View>
-                  <Text style={styles.singleText}>{result.stepsSummary[currentStepIndex]}</Text>
-                </View>
-                <View style={styles.singleActionRow}>
-                  <Pressable
-                    style={[styles.singleButtonPrev, currentStepIndex === 0 && styles.singleDisabled]}
-                    onPress={() => setCurrentStepIndex((idx) => Math.max(0, idx - 1))}
-                    disabled={currentStepIndex === 0}
-                  >
-                    <Text style={styles.singleButtonPrevText}>‹ 上一步</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.singleButtonNext, currentStepIndex === result.stepsSummary.length - 1 && styles.singleDisabled]}
-                    onPress={() => setCurrentStepIndex((idx) => Math.min(result.stepsSummary.length - 1, idx + 1))}
-                    disabled={currentStepIndex === result.stepsSummary.length - 1}
-                  >
-                    <Text style={styles.singleButtonNextText}>下一步 ›</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.bottomActionRow}>
-            <Pressable style={styles.bottomActionButton} onPress={() => onOpenDish({ dishId: result.dishId, dishName: result.dishName })}>
-              <Text style={styles.bottomActionText}>记录浏览</Text>
-            </Pressable>
-          </View>
+          <CookingStepsCard steps={result.stepsSummary} />
         </View>
       )}
     </View>
@@ -334,28 +288,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 8,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
   },
-  resultHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  resultTitle: { fontSize: 20, fontWeight: "600", color: "#1a1a1a" },
-  resultMeta: { fontSize: 14, color: "#757575", marginTop: 6 },
-  favoriteText: { fontSize: 22, color: "#757575" },
+  resultHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  resultTitle: { fontSize: 19, fontWeight: "600", color: "#1a1a1a" },
+  resultMetaRow: { flexDirection: "row", gap: 10, marginTop: 4 },
+  resultMetaItem: { fontSize: 13, color: "#757575" },
+  favoriteText: { fontSize: 21, color: "#757575" },
   favoriteTextActive: { color: "#ff6b35" },
-  videoButton: {
-    backgroundColor: "#ff6b35",
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-  },
-  videoButtonText: { color: "#fff", fontSize: 16, fontWeight: "500" },
   ingredientCard: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -377,90 +324,5 @@ const styles = StyleSheet.create({
   secondaryChipText: { color: "#4ecdc4" },
   seasoningChip: { backgroundColor: "#f5f5f5" },
   seasoningChipText: { color: "#1a1a1a" },
-  stepCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  stepHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  stepTitle: { fontSize: 18, color: "#1a1a1a", fontWeight: "600" },
-  modeToggleButton: {
-    borderRadius: 999,
-    backgroundColor: "rgba(255,107,53,0.1)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  modeToggleText: { color: "#ff6b35", fontSize: 14, fontWeight: "500" },
-  stepItem: {
-    backgroundColor: "rgba(245,245,245,0.5)",
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  stepIndex: {
-    width: 28,
-    height: 28,
-    borderRadius: 999,
-    backgroundColor: "#ff6b35",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepIndexText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  stepText: { flex: 1, color: "#1a1a1a", fontSize: 16, lineHeight: 24 },
-  singleWrap: { gap: 12 },
-  singleProgress: { textAlign: "center", color: "#757575", fontSize: 14 },
-  singleContent: {
-    borderRadius: 16,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "rgba(255,107,53,0.05)",
-  },
-  singleIndex: {
-    width: 48,
-    height: 48,
-    borderRadius: 999,
-    backgroundColor: "#ff6b35",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  singleIndexText: { color: "#fff", fontSize: 24, fontWeight: "500" },
-  singleText: { color: "#1a1a1a", fontSize: 18, textAlign: "center", lineHeight: 30 },
-  singleActionRow: { flexDirection: "row", gap: 8 },
-  singleButtonPrev: {
-    flex: 1,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: "#f5f5f5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  singleButtonPrevText: { color: "#1a1a1a", fontSize: 16, fontWeight: "500" },
-  singleButtonNext: {
-    flex: 1,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: "#ff6b35",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  singleButtonNextText: { color: "#fff", fontSize: 16, fontWeight: "500" },
-  singleDisabled: { opacity: 0.45 },
-  bottomActionRow: { flexDirection: "row", justifyContent: "flex-end" },
-  bottomActionButton: {
-    borderRadius: 10,
-    backgroundColor: "#fff3e0",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  bottomActionText: { color: "#ff6b35", fontSize: 13, fontWeight: "500" },
 });
 

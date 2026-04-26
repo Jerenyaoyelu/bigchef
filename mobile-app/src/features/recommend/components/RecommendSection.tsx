@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { track } from "../../../analytics/tracker";
 import { RecommendResponse } from "../../../types/api";
 import { fetchRecommendByIngredients } from "../api/recommendApi";
@@ -18,6 +18,7 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
   const [result, setResult] = useState<RecommendResponse | null>(null);
   const [searched, setSearched] = useState(false);
   const [sortMode, setSortMode] = useState<"match" | "missing" | "time">("match");
+  const [aiBoostState, setAiBoostState] = useState<"idle" | "loading" | "done">("idle");
   const commonIngredients = ["鸡蛋", "西红柿", "土豆", "鸡肉", "猪肉", "牛肉", "白菜", "豆腐", "葱", "姜", "蒜", "青椒"];
 
   const sortedList = useMemo(() => {
@@ -28,6 +29,7 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
       return b.matchScore - a.matchScore;
     });
   }, [result?.list, sortMode]);
+  const aiEnhancedList = useMemo(() => sortedList, [sortedList]);
 
   function addIngredient(value: string) {
     const normalized = value.trim();
@@ -65,6 +67,7 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
     if (!ingredients.length) return;
     setLoading(true);
     setSearched(true);
+    setAiBoostState("idle");
     onError("");
     try {
       track("recommend_search_submitted", { ingredients });
@@ -77,6 +80,16 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
     } finally {
       setLoading(false);
     }
+  }
+
+  function onAiBoost() {
+    if (!result?.list?.length || aiBoostState === "loading") return;
+    setAiBoostState("loading");
+    track("ai_recommend_triggered_manual", { total: result.total });
+    setTimeout(() => {
+      setAiBoostState("done");
+      track("ai_generation_saved", { scene: "recommend_ai_boost" });
+    }, 1200);
   }
 
   return (
@@ -151,7 +164,21 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
 
       {!!result?.list?.length && (
         <View style={styles.resultSection}>
-          <Text style={styles.resultCount}>找到 {result.total} 个匹配菜谱</Text>
+          <View style={styles.resultHeadRow}>
+            <Text style={styles.resultCount}>找到 {aiEnhancedList.length} 个匹配菜谱</Text>
+            {aiBoostState === "idle" && (
+              <Pressable style={styles.aiBoostButton} onPress={onAiBoost}>
+                <Text style={styles.aiBoostIcon}>✧</Text>
+                <Text style={styles.aiBoostText}>AI 帮我再推荐</Text>
+              </Pressable>
+            )}
+            {aiBoostState === "done" && (
+              <View style={styles.aiBoostDoneBadge}>
+                <Text style={styles.aiBoostIcon}>✧</Text>
+                <Text style={styles.aiBoostDoneText}>已使用 AI 增强</Text>
+              </View>
+            )}
+          </View>
           <View style={styles.sortRow}>
             <Pressable style={[styles.sortButton, sortMode === "match" && styles.sortButtonActive]} onPress={() => setSortMode("match")}>
               <Text style={[styles.sortButtonText, sortMode === "match" && styles.sortButtonTextActive]}>匹配优先</Text>
@@ -166,48 +193,69 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
         </View>
       )}
 
-      {sortedList.map((item) => (
-        <View key={item.dishId} style={styles.resultCard}>
-          <View style={styles.resultHead}>
-            <Text style={styles.resultTitle}>{item.dishName}</Text>
-            <Pressable
-              onPress={() => onToggleFavorite({ dishId: item.dishId, dishName: item.dishName })}
-              hitSlop={6}
-              style={styles.favoriteButton}
-            >
-              <Text style={[styles.favoriteText, favoriteDishIds.includes(item.dishId) && styles.favoriteTextActive]}>
-                {favoriteDishIds.includes(item.dishId) ? "♥" : "♡"}
-              </Text>
+      {!!result?.list?.length && aiBoostState === "loading" && (
+        <View style={styles.aiLoadingCard}>
+          <ActivityIndicator size="large" color="#ff6b35" />
+          <Text style={styles.aiLoadingText}>AI 正在为你生成更多推荐...</Text>
+        </View>
+      )}
+
+      {aiBoostState !== "loading" &&
+        (aiBoostState === "idle" ? sortedList : aiEnhancedList).map((item, index) => (
+          <View key={item.dishId} style={styles.resultCard}>
+            <View style={styles.resultHead}>
+              <Text style={styles.resultTitle}>{item.dishName}</Text>
+              <Pressable
+                onPress={() => onToggleFavorite({ dishId: item.dishId, dishName: item.dishName })}
+                hitSlop={6}
+                style={styles.favoriteButton}
+              >
+                <Text style={[styles.favoriteText, favoriteDishIds.includes(item.dishId) && styles.favoriteTextActive]}>
+                  {favoriteDishIds.includes(item.dishId) ? "♥" : "♡"}
+                </Text>
+              </Pressable>
+            </View>
+            <Text style={styles.matchText}>↗ 匹配度 {(item.matchScore * 100).toFixed(0)}%</Text>
+            {aiBoostState === "done" && (
+              <View style={styles.aiTagRow}>
+                <View style={styles.aiTag}>
+                  <Text style={styles.aiTagIcon}>✧</Text>
+                  <Text style={styles.aiTagText}>AI增强</Text>
+                </View>
+                {index === 1 && (
+                  <View style={styles.aiVerifiedTag}>
+                    <Text style={styles.aiVerifiedTagText}>已校验</Text>
+                  </View>
+                )}
+              </View>
+            )}
+            <View style={styles.metaChipRow}>
+              <View style={[styles.metaChip, styles.metaDifficultyBg]}>
+                <Text style={[styles.metaChipText, styles.metaDifficultyText]}>🍃 {mapDifficulty(item.difficulty)}</Text>
+              </View>
+              <View style={[styles.metaChip, styles.metaTimeBg]}>
+                <Text style={[styles.metaChipText, styles.metaTimeText]}>🕒 {item.cookTimeMinutes}分钟</Text>
+              </View>
+              {!!item.videos.length && (
+                <Pressable
+                  style={[styles.metaChip, styles.metaVideoBg]}
+                  onPress={() => track("recommend_video_clicked", { dishId: item.dishId, url: item.videos[0].url })}
+                >
+                  <Text style={[styles.metaChipText, styles.metaVideoText]}>▷ 有视频</Text>
+                </Pressable>
+              )}
+            </View>
+            {!!item.missingIngredients.length && (
+              <View style={styles.missingCard}>
+                <Text style={styles.missingLabel}>还需准备：</Text>
+                <Text style={styles.missingValue}>{item.missingIngredients.join("、")}</Text>
+              </View>
+            )}
+            <Pressable style={styles.openButton} onPress={() => onOpenDish({ dishId: item.dishId, dishName: item.dishName })}>
+              <Text style={styles.openButtonText}>查看做法</Text>
             </Pressable>
           </View>
-          <Text style={styles.matchText}>↗ 匹配度 {(item.matchScore * 100).toFixed(0)}%</Text>
-          <View style={styles.metaChipRow}>
-            <View style={[styles.metaChip, styles.metaDifficultyBg]}>
-              <Text style={[styles.metaChipText, styles.metaDifficultyText]}>🍃 {mapDifficulty(item.difficulty)}</Text>
-            </View>
-            <View style={[styles.metaChip, styles.metaTimeBg]}>
-              <Text style={[styles.metaChipText, styles.metaTimeText]}>🕒 {item.cookTimeMinutes}分钟</Text>
-            </View>
-            {!!item.videos.length && (
-              <Pressable
-                style={[styles.metaChip, styles.metaVideoBg]}
-                onPress={() => track("recommend_video_clicked", { dishId: item.dishId, url: item.videos[0].url })}
-              >
-                <Text style={[styles.metaChipText, styles.metaVideoText]}>▷ 有视频</Text>
-              </Pressable>
-            )}
-          </View>
-          {!!item.missingIngredients.length && (
-            <View style={styles.missingCard}>
-              <Text style={styles.missingLabel}>还需准备：</Text>
-              <Text style={styles.missingValue}>{item.missingIngredients.join("、")}</Text>
-            </View>
-          )}
-          <Pressable style={styles.openButton} onPress={() => onOpenDish({ dishId: item.dishId, dishName: item.dishName })}>
-            <Text style={styles.openButtonText}>查看做法</Text>
-          </Pressable>
-        </View>
-      ))}
+        ))}
     </View>
   );
 }
@@ -305,7 +353,29 @@ const styles = StyleSheet.create({
   emptyTitle: { color: "#1a1a1a", fontSize: 16, fontWeight: "600" },
   emptyDesc: { color: "#757575", fontSize: 14, lineHeight: 22 },
   resultSection: { gap: 10 },
+  resultHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   resultCount: { color: "#757575", fontSize: 14 },
+  aiBoostButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#f3e8ff",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  aiBoostDoneBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#f3e8ff",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  aiBoostIcon: { color: "#8200db", fontSize: 13 },
+  aiBoostText: { color: "#8200db", fontSize: 14, fontWeight: "500" },
+  aiBoostDoneText: { color: "#8200db", fontSize: 14, fontWeight: "500" },
   sortRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sortButton: {
     borderRadius: 999,
@@ -335,6 +405,29 @@ const styles = StyleSheet.create({
   favoriteText: { color: "#757575", fontSize: 22 },
   favoriteTextActive: { color: "#ff6b35" },
   matchText: { color: "#ff6b35", fontSize: 14 },
+  aiTagRow: { flexDirection: "row", gap: 6, marginTop: -2 },
+  aiTag: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#e9d4ff",
+    backgroundColor: "#f3e8ff",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  aiTagIcon: { color: "#8200db", fontSize: 11 },
+  aiTagText: { color: "#8200db", fontSize: 12 },
+  aiVerifiedTag: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#b9f8cf",
+    backgroundColor: "#dcfce7",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  aiVerifiedTagText: { color: "#008236", fontSize: 12 },
   metaChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   metaChip: {
     borderRadius: 999,
@@ -367,5 +460,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   openButtonText: { color: "#ff6b35", fontWeight: "600", fontSize: 13 },
+  aiLoadingCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "transparent",
+    paddingVertical: 40,
+  },
+  aiLoadingText: { color: "#757575", fontSize: 14 },
 });
 

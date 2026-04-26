@@ -16,6 +16,12 @@ async function main() {
       { id: "ing_tomato", name: "西红柿", aliasNames: ["番茄"], category: "main" },
       { id: "ing_scallion", name: "葱", aliasNames: ["葱花"], category: "secondary" },
       { id: "ing_wing", name: "鸡翅中", aliasNames: ["鸡中翅"], category: "main" },
+      { id: "ing_pork", name: "猪肉", aliasNames: ["猪里脊肉"], category: "main" },
+      { id: "ing_starch", name: "淀粉", aliasNames: [], category: "secondary" },
+      { id: "ing_flour", name: "面粉", aliasNames: [], category: "secondary" },
+      { id: "ing_vinegar", name: "白醋", aliasNames: [], category: "seasoning" },
+      { id: "ing_sugar", name: "白糖", aliasNames: [], category: "seasoning" },
+      { id: "ing_ketchup", name: "番茄酱", aliasNames: [], category: "seasoning" },
       { id: "ing_cola", name: "可乐", aliasNames: [], category: "seasoning" },
       { id: "ing_soy", name: "生抽", aliasNames: [], category: "seasoning" },
       { id: "ing_ginger", name: "姜片", aliasNames: ["姜"], category: "secondary" },
@@ -53,6 +59,23 @@ async function main() {
     },
   });
 
+  await prisma.dish.create({
+    data: {
+      id: "dish_201",
+      name: "糖醋里脊",
+      cookTimeMinutes: 30,
+      difficulty: 2,
+      tasteTags: ["酸甜", "家常"],
+      stepsSummary: [
+        "里脊肉切条，加盐和料酒腌制10分钟。",
+        "鸡蛋打散后加入淀粉和面粉调成糊，肉条裹糊。",
+        "下锅炸至金黄后复炸一次，口感更酥脆。",
+        "调糖醋汁：白醋、白糖、番茄酱加少许清水。",
+        "锅中收汁后倒入里脊，快速翻炒均匀即可。",
+      ],
+    },
+  });
+
   await prisma.dishIngredient.createMany({
     data: [
       { id: "di_001", dishId: "dish_001", ingredientId: "ing_tomato", role: "main", amountText: "2个" },
@@ -62,6 +85,13 @@ async function main() {
       { id: "di_005", dishId: "dish_101", ingredientId: "ing_cola", role: "seasoning", amountText: "1听" },
       { id: "di_006", dishId: "dish_101", ingredientId: "ing_soy", role: "seasoning", amountText: "2勺" },
       { id: "di_007", dishId: "dish_101", ingredientId: "ing_ginger", role: "secondary", amountText: "3片" },
+      { id: "di_201", dishId: "dish_201", ingredientId: "ing_pork", role: "main", amountText: "300g" },
+      { id: "di_202", dishId: "dish_201", ingredientId: "ing_egg", role: "secondary", amountText: "1个" },
+      { id: "di_203", dishId: "dish_201", ingredientId: "ing_starch", role: "secondary", amountText: "适量" },
+      { id: "di_204", dishId: "dish_201", ingredientId: "ing_flour", role: "secondary", amountText: "适量" },
+      { id: "di_205", dishId: "dish_201", ingredientId: "ing_vinegar", role: "seasoning", amountText: "3勺" },
+      { id: "di_206", dishId: "dish_201", ingredientId: "ing_sugar", role: "seasoning", amountText: "4勺" },
+      { id: "di_207", dishId: "dish_201", ingredientId: "ing_ketchup", role: "seasoning", amountText: "2勺" },
     ],
   });
 
