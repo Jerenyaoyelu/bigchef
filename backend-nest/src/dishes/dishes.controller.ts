@@ -1,5 +1,6 @@
 import { Body, Controller, Post } from "@nestjs/common";
 import { Get, Param, Query } from "@nestjs/common";
+import { RequestVideoDto } from "./dto/request-video.dto";
 import { SearchDishDto } from "./dto/search-dish.dto";
 import { DishesService } from "./dishes.service";
 
@@ -21,5 +22,10 @@ export class DishesController {
   @Get(":dishId")
   detail(@Param("dishId") dishId: string) {
     return this.dishesService.findById(dishId);
+  }
+
+  @Post(":dishId/request-video")
+  requestVideo(@Param("dishId") dishId: string, @Body() payload: RequestVideoDto) {
+    return this.dishesService.requestVideoUpdate(dishId, payload);
   }
 }

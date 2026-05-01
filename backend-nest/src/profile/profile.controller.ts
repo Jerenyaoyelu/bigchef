@@ -9,13 +9,25 @@ type DishPayload = {
 export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
 
-  private userIdFrom(headerUserId?: string, queryUserId?: string) {
-    return this.profileService.resolveUserId(headerUserId || queryUserId);
+  private userIdFrom(params: {
+    headerUserId?: string;
+    queryUserId?: string;
+    headerGuestId?: string;
+    queryGuestId?: string;
+  }) {
+    return this.profileService.resolveUserId(
+      params.headerUserId || params.queryUserId || params.headerGuestId || params.queryGuestId,
+    );
   }
 
   @Get("favorites")
-  favorites(@Headers("x-user-id") headerUserId?: string, @Query("userId") queryUserId?: string) {
-    return this.profileService.getFavorites(this.userIdFrom(headerUserId, queryUserId));
+  favorites(
+    @Headers("x-user-id") headerUserId?: string,
+    @Query("userId") queryUserId?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
+  ) {
+    return this.profileService.getFavorites(this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }));
   }
 
   @Post("favorites")
@@ -23,8 +35,13 @@ export class ProfileController {
     @Body() payload: DishPayload,
     @Headers("x-user-id") headerUserId?: string,
     @Query("userId") queryUserId?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
   ) {
-    return this.profileService.addFavorite(payload.dishId, this.userIdFrom(headerUserId, queryUserId));
+    return this.profileService.addFavorite(
+      payload.dishId,
+      this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }),
+    );
   }
 
   @Delete("favorites/:dishId")
@@ -32,14 +49,25 @@ export class ProfileController {
     @Param("dishId") dishId: string,
     @Headers("x-user-id") headerUserId?: string,
     @Query("userId") queryUserId?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
   ) {
-    return this.profileService.removeFavorite(dishId, this.userIdFrom(headerUserId, queryUserId));
+    return this.profileService.removeFavorite(
+      dishId,
+      this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }),
+    );
   }
 
   @Get("history")
-  history(@Headers("x-user-id") headerUserId?: string, @Query("userId") queryUserId?: string, @Query("limit") limit?: string) {
+  history(
+    @Headers("x-user-id") headerUserId?: string,
+    @Query("userId") queryUserId?: string,
+    @Query("limit") limit?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
+  ) {
     const parsed = limit ? Math.max(1, Number(limit) || 20) : 20;
-    return this.profileService.getHistory(this.userIdFrom(headerUserId, queryUserId), parsed);
+    return this.profileService.getHistory(this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }), parsed);
   }
 
   @Post("history")
@@ -47,12 +75,22 @@ export class ProfileController {
     @Body() payload: DishPayload,
     @Headers("x-user-id") headerUserId?: string,
     @Query("userId") queryUserId?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
   ) {
-    return this.profileService.addHistory(payload.dishId, this.userIdFrom(headerUserId, queryUserId));
+    return this.profileService.addHistory(
+      payload.dishId,
+      this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }),
+    );
   }
 
   @Delete("history")
-  clearHistory(@Headers("x-user-id") headerUserId?: string, @Query("userId") queryUserId?: string) {
-    return this.profileService.clearHistory(this.userIdFrom(headerUserId, queryUserId));
+  clearHistory(
+    @Headers("x-user-id") headerUserId?: string,
+    @Query("userId") queryUserId?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
+  ) {
+    return this.profileService.clearHistory(this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }));
   }
 }

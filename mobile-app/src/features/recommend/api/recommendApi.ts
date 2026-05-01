@@ -1,11 +1,18 @@
 import { postJson } from "../../../api/http";
 import { RecommendResponse } from "../../../types/api";
 
-export async function fetchRecommendByIngredients(ingredients: string[]) {
+export type FetchRecommendOptions = {
+  aiBoost?: boolean;
+  page?: number;
+  pageSize?: number;
+};
+
+export async function fetchRecommendByIngredients(ingredients: string[], options?: FetchRecommendOptions) {
   return postJson<RecommendResponse>("/api/v1/recommend/by-ingredients", {
     ingredients,
-    page: 1,
-    pageSize: 10,
+    page: options?.page ?? 1,
+    pageSize: options?.pageSize ?? 10,
+    aiBoost: options?.aiBoost ?? false,
   });
 }
 

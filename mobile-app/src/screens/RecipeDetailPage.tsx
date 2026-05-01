@@ -4,39 +4,61 @@ import { track } from "../analytics/tracker";
 import { CookingStepsCard } from "../features/dish/components/CookingStepsCard";
 import { VideoTutorialCard } from "../features/dish/components/VideoTutorialCard";
 import { fetchDishById } from "../features/dish/api/dishApi";
-import { DishResponse } from "../types/api";
+import { DishDetailPrefetch, DishResponse } from "../types/api";
 
 type RecipeDetailPageProps = {
   dishId: string;
+  /** 从推荐列表进入时携带，用于首屏展示已有字段 */
+  listPreview?: DishDetailPrefetch | null;
   favoriteDishIds: string[];
   onToggleFavorite: (dish: { dishId: string; dishName: string }) => void;
   onBack: () => void;
   onOpenDish: (dish: { dishId: string; dishName: string }) => void;
 };
 
-export function RecipeDetailPage({ dishId, favoriteDishIds, onToggleFavorite, onBack, onOpenDish }: RecipeDetailPageProps) {
+export function RecipeDetailPage({
+  dishId,
+  listPreview,
+  favoriteDishIds,
+  onToggleFavorite,
+  onBack,
+  onOpenDish,
+}: RecipeDetailPageProps) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DishResponse | null>(null);
   const [error, setError] = useState("");
   const [videoRequestState, setVideoRequestState] = useState<"idle" | "requested">("idle");
 
+  const preview = listPreview?.dishId === dishId ? listPreview : null;
+
   useEffect(() => {
+    setVideoRequestState("idle");
+  }, [dishId]);
+
+  useEffect(() => {
+    let cancelled = false;
     void (async () => {
       setLoading(true);
       setError("");
+      setResult(null);
       try {
         const data = await fetchDishById(dishId);
+        if (cancelled) return;
         setResult(data);
         onOpenDish({ dishId: data.dishId, dishName: data.dishName });
       } catch (err) {
-        setError((err as Error).message || "加载失败");
+        if (!cancelled) setError((err as Error).message || "加载失败");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [dishId, onOpenDish]);
 
-  const isFavorite = useMemo(() => (result ? favoriteDishIds.includes(result.dishId) : false), [favoriteDishIds, result]);
+  const headerTitle = result?.dishName ?? preview?.dishName ?? "菜谱详情";
+  const isFavorite = useMemo(() => favoriteDishIds.includes(dishId), [favoriteDishIds, dishId]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -45,11 +67,15 @@ export function RecipeDetailPage({ dishId, favoriteDishIds, onToggleFavorite, on
           <Text style={styles.headerIcon}>←</Text>
         </Pressable>
         <Text numberOfLines={1} style={styles.headerTitle}>
-          {result?.dishName ?? "菜谱详情"}
+          {headerTitle}
         </Text>
         <Pressable
           style={styles.headerIconButton}
-          onPress={() => result && onToggleFavorite({ dishId: result.dishId, dishName: result.dishName })}
+          onPress={() => {
+            const name = result?.dishName ?? preview?.dishName;
+            if (!name) return;
+            onToggleFavorite({ dishId, dishName: name });
+          }}
         >
           <Text style={[styles.headerIcon, isFavorite && styles.favoriteActive]}>{isFavorite ? "♥" : "♡"}</Text>
         </Pressable>
@@ -57,7 +83,35 @@ export function RecipeDetailPage({ dishId, favoriteDishIds, onToggleFavorite, on
 
       <ScrollView contentContainerStyle={styles.content}>
         {!!error && <Text style={styles.errorText}>{error}</Text>}
-        {loading && (
+        {loading && preview && (
+          <>
+            <View style={styles.baseCard}>
+              <Text style={styles.baseTitle}>{preview.dishName}</Text>
+              <View style={styles.baseMeta}>
+                <Text style={styles.baseMetaText}>◷ {preview.cookTimeMinutes ?? 20}分钟</Text>
+                <Text style={styles.baseMetaText}>👨‍🍳 {mapDifficulty(preview.difficulty)}</Text>
+              </View>
+            </View>
+            <VideoTutorialCard
+              hasVideo={(preview.videos?.length ?? 0) > 0}
+              requestState={videoRequestState}
+              onWatchVideo={() => {
+                const v = preview.videos?.[0];
+                if (!v?.url) return;
+                track("dish_video_clicked", { dishId, url: v.url, source: "recipe_detail_page_preview" });
+              }}
+              onRequestVideo={() => {
+                setVideoRequestState("requested");
+                track("video_request_update_click", { dishId, source: "recipe_detail_page_preview" });
+              }}
+            />
+            <View style={styles.loadingInline}>
+              <ActivityIndicator size="small" color="#ff6b35" />
+              <Text style={styles.loadingInlineText}>正在加载配料与步骤…</Text>
+            </View>
+          </>
+        )}
+        {loading && !preview && (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="large" color="#ff6b35" />
             <Text style={styles.loadingText}>菜谱详情加载中...</Text>
@@ -154,6 +208,18 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   loadingText: { color: "#757575", fontSize: 14 },
+  loadingInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 20,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+  },
+  loadingInlineText: { color: "#757575", fontSize: 14 },
   baseCard: {
     backgroundColor: "#fff",
     borderRadius: 16,

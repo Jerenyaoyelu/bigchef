@@ -64,6 +64,18 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
     return "较难";
   }
 
+  const canReset = Boolean(dishName.trim()) || result !== null || isEmptyResult;
+
+  function resetDishSearch() {
+    setDishName("");
+    setResult(null);
+    setIsEmptyResult(false);
+    setLoading(false);
+    setVideoRequestStateByDish({});
+    onError("");
+    track("dish_search_reset");
+  }
+
   async function onSubmit() {
     if (!dishName.trim()) return;
     setLoading(true);
@@ -113,6 +125,11 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
       >
         <Text style={styles.primaryButtonText}>{loading ? "查询中..." : "查询菜谱"}</Text>
       </Pressable>
+      {canReset ? (
+        <Pressable style={styles.resetButton} onPress={resetDishSearch} hitSlop={8}>
+          <Text style={styles.resetButtonText}>重置查询</Text>
+        </Pressable>
+      ) : null}
 
       {!result && (
         <View style={styles.popularCard}>
@@ -260,6 +277,16 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
   buttonDisabled: { opacity: 0.5 },
+  resetButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
+    backgroundColor: "#fff",
+  },
+  resetButtonText: { color: "#757575", fontSize: 14, fontWeight: "500" },
   popularCard: {
     backgroundColor: "rgba(78,205,196,0.1)",
     borderRadius: 16,

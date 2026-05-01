@@ -1,19 +1,41 @@
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import { DishSection } from "../features/dish/components/DishSection";
 import { ProfileSection } from "../features/profile/components/ProfileSection";
 import { RecommendSection } from "../features/recommend/components/RecommendSection";
+import { DishDetailPrefetch } from "../types/api";
 import { RecipeDetailPage } from "./RecipeDetailPage";
 import { useUserFoodStore } from "../store/userFoodStore";
 
 type TabKey = "recommend" | "dish" | "profile";
+
+function TabLayer({ visible, children }: { visible: boolean; children: ReactNode }) {
+  return (
+    <View
+      style={[
+        StyleSheet.absoluteFillObject,
+        {
+          opacity: visible ? 1 : 0,
+          zIndex: visible ? 1 : 0,
+          pointerEvents: visible ? "auto" : "none",
+        },
+      ]}
+      collapsable={false}
+    >
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        {children}
+      </ScrollView>
+    </View>
+  );
+}
 
 export function HomeScreen() {
   const [activeTab, setActiveTab] = useState<TabKey>("recommend");
   const [errorMessage, setErrorMessage] = useState("");
   const [focusDishId, setFocusDishId] = useState<string | null>(null);
   const [detailDishId, setDetailDishId] = useState<string | null>(null);
+  const [detailPrefetch, setDetailPrefetch] = useState<DishDetailPrefetch | null>(null);
   const favorites = useUserFoodStore((s) => s.favorites) ?? [];
   const recentViews = useUserFoodStore((s) => s.recentViews) ?? [];
   const toggleFavorite = useUserFoodStore((s) => s.toggleFavorite);
@@ -22,43 +44,38 @@ export function HomeScreen() {
   const hydrateFromServer = useUserFoodStore((s) => s.hydrateFromServer);
   const favoriteDishIds = favorites.map((item) => item.dishId);
 
-  function openDishFromRecommend(dish: { dishId: string; dishName: string }) {
+  function openDishFromRecommend(dish: DishDetailPrefetch) {
+    setDetailPrefetch(dish);
     setDetailDishId(dish.dishId);
+  }
+
+  function closeDishDetail() {
+    setDetailDishId(null);
+    setDetailPrefetch(null);
   }
 
   useEffect(() => {
     void hydrateFromServer();
   }, [hydrateFromServer]);
 
-  if (detailDishId) {
-    return (
-      <>
-        <RecipeDetailPage
-          dishId={detailDishId}
-          favoriteDishIds={favoriteDishIds}
-          onToggleFavorite={toggleFavorite}
-          onOpenDish={addRecentView}
-          onBack={() => setDetailDishId(null)}
-        />
-        <StatusBar style="auto" />
-      </>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.main}>
-        <ScrollView contentContainerStyle={styles.content}>
-          {!!errorMessage && <Text style={styles.error}>{errorMessage}</Text>}
-          {activeTab === "recommend" && (
+        {!!errorMessage && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.error}>{errorMessage}</Text>
+          </View>
+        )}
+        <View style={styles.tabStack}>
+          <TabLayer visible={activeTab === "recommend"}>
             <RecommendSection
               onError={setErrorMessage}
               favoriteDishIds={favoriteDishIds}
               onToggleFavorite={toggleFavorite}
               onOpenDish={openDishFromRecommend}
             />
-          )}
-          {activeTab === "dish" && (
+          </TabLayer>
+          <TabLayer visible={activeTab === "dish"}>
             <DishSection
               onError={setErrorMessage}
               favoriteDishIds={favoriteDishIds}
@@ -66,8 +83,8 @@ export function HomeScreen() {
               onOpenDish={addRecentView}
               focusDishId={focusDishId}
             />
-          )}
-          {activeTab === "profile" && (
+          </TabLayer>
+          <TabLayer visible={activeTab === "profile"}>
             <ProfileSection
               favorites={favorites}
               recentViews={recentViews}
@@ -76,17 +93,34 @@ export function HomeScreen() {
                 setFocusDishId(dishId);
                 setActiveTab("dish");
               }}
-              onOpenDishDetail={(dishId) => setDetailDishId(dishId)}
+              onOpenDishDetail={(dishId) => {
+                setDetailPrefetch(null);
+                setDetailDishId(dishId);
+              }}
               onToggleFavorite={toggleFavorite}
               onClearRecentViews={clearRecentViews}
             />
-          )}
-        </ScrollView>
-        <View style={styles.bottomTabBar}>
-          <TabButton label="推荐" icon="🍳" active={activeTab === "recommend"} onPress={() => setActiveTab("recommend")} />
-          <TabButton label="查菜" icon="🔍" active={activeTab === "dish"} onPress={() => setActiveTab("dish")} />
-          <TabButton label="我的" icon="👤" active={activeTab === "profile"} onPress={() => setActiveTab("profile")} />
+          </TabLayer>
         </View>
+        {!detailDishId ? (
+          <View style={styles.bottomTabBar}>
+            <TabButton label="推荐" icon="🍳" active={activeTab === "recommend"} onPress={() => setActiveTab("recommend")} />
+            <TabButton label="查菜" icon="🔍" active={activeTab === "dish"} onPress={() => setActiveTab("dish")} />
+            <TabButton label="我的" icon="👤" active={activeTab === "profile"} onPress={() => setActiveTab("profile")} />
+          </View>
+        ) : null}
+        {detailDishId ? (
+          <View style={styles.detailOverlay}>
+            <RecipeDetailPage
+              dishId={detailDishId}
+              listPreview={detailPrefetch?.dishId === detailDishId ? detailPrefetch : null}
+              favoriteDishIds={favoriteDishIds}
+              onToggleFavorite={toggleFavorite}
+              onOpenDish={addRecentView}
+              onBack={closeDishDetail}
+            />
+          </View>
+        ) : null}
       </View>
       <StatusBar style="auto" />
     </SafeAreaView>
@@ -113,8 +147,17 @@ function TabButton({ label, icon, active, onPress }: TabButtonProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fafafa" },
-  main: { flex: 1 },
+  main: { flex: 1, position: "relative" },
+  errorBanner: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  tabStack: { flex: 1, position: "relative" },
+  scroll: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24, gap: 12 },
+  detailOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+    backgroundColor: "#fff",
+    elevation: 24,
+  },
   bottomTabBar: {
     height: 66,
     borderTopWidth: 1,

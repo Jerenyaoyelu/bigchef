@@ -8,6 +8,6 @@ export class RecommendController {
 
   @Post("by-ingredients")
   byIngredients(@Body() payload: RecommendByIngredientsDto) {
-    return this.recommendService.byIngredients(payload.ingredients, payload.page, payload.pageSize);
+    return this.recommendService.byIngredients(payload.ingredients, payload.page, payload.pageSize, payload.aiBoost);
   }
 }

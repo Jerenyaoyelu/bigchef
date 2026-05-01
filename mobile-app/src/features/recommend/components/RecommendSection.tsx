@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { track } from "../../../analytics/tracker";
-import { RecommendResponse } from "../../../types/api";
+import { DishDetailPrefetch, MissingIngredientItem, RecommendItem, RecommendResponse } from "../../../types/api";
 import { fetchRecommendByIngredients } from "../api/recommendApi";
 
 type RecommendSectionProps = {
   onError: (message: string) => void;
   favoriteDishIds: string[];
   onToggleFavorite: (dish: { dishId: string; dishName: string }) => void;
-  onOpenDish: (dish: { dishId: string; dishName: string }) => void;
+  onOpenDish: (dish: DishDetailPrefetch) => void;
 };
 
 export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish }: RecommendSectionProps) {
@@ -19,17 +19,49 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
   const [searched, setSearched] = useState(false);
   const [sortMode, setSortMode] = useState<"match" | "missing" | "time">("match");
   const [aiBoostState, setAiBoostState] = useState<"idle" | "loading" | "done">("idle");
+  /** 混合结果时：先展示 AI；仅 mixed 时使用 */
+  const [resultListTab, setResultListTab] = useState<"ai" | "library">("ai");
   const commonIngredients = ["鸡蛋", "西红柿", "土豆", "鸡肉", "猪肉", "牛肉", "白菜", "豆腐", "葱", "姜", "蒜", "青椒"];
+
+  function partitionMissingByRole(items: MissingIngredientItem[]) {
+    const main = items.filter((i) => i.role === "main").map((i) => i.name);
+    const secondary = items.filter((i) => i.role === "secondary").map((i) => i.name);
+    return { main, secondary };
+  }
+
+  function listEntryOrigin(item: RecommendItem): "db" | "ai" {
+    if (item.entrySource === "db" || item.entrySource === "ai") return item.entrySource;
+    return result?.source === "db" ? "db" : "ai";
+  }
+
+  const compareRecommendItems = (a: RecommendItem, b: RecommendItem) => {
+    if (sortMode === "missing") return a.missingIngredients.length - b.missingIngredients.length;
+    if (sortMode === "time") return a.cookTimeMinutes - b.cookTimeMinutes;
+    return b.matchScore - a.matchScore;
+  };
 
   const sortedList = useMemo(() => {
     const list = result?.list ?? [];
-    return [...list].sort((a, b) => {
-      if (sortMode === "missing") return a.missingIngredients.length - b.missingIngredients.length;
-      if (sortMode === "time") return a.cookTimeMinutes - b.cookTimeMinutes;
-      return b.matchScore - a.matchScore;
-    });
+    return [...list].sort(compareRecommendItems);
   }, [result?.list, sortMode]);
-  const aiEnhancedList = useMemo(() => sortedList, [sortedList]);
+
+  const isMixedResult = result?.source === "mixed";
+
+  const sortedAiList = useMemo(() => {
+    const list = (result?.list ?? []).filter((i) => listEntryOrigin(i) === "ai");
+    return [...list].sort(compareRecommendItems);
+  }, [result?.list, result?.source, sortMode]);
+
+  const sortedLibraryList = useMemo(() => {
+    const list = (result?.list ?? []).filter((i) => listEntryOrigin(i) === "db");
+    return [...list].sort(compareRecommendItems);
+  }, [result?.list, result?.source, sortMode]);
+
+  const displayList = isMixedResult
+    ? resultListTab === "ai"
+      ? sortedAiList
+      : sortedLibraryList
+    : sortedList;
 
   function addIngredient(value: string) {
     const normalized = value.trim();
@@ -82,14 +114,52 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
     }
   }
 
-  function onAiBoost() {
-    if (!result?.list?.length || aiBoostState === "loading") return;
+  const canReset = ingredients.length > 0 || searched || !!result || inputValue.trim().length > 0;
+
+  function resetRecommendState() {
+    setIngredients([]);
+    setInputValue("");
+    setLoading(false);
+    setResult(null);
+    setSearched(false);
+    setSortMode("match");
+    setAiBoostState("idle");
+    setResultListTab("ai");
+    onError("");
+    track("recommend_reset");
+  }
+
+  async function onAiBoost() {
+    if (!result?.list?.length || !ingredients.length || aiBoostState === "loading") return;
     setAiBoostState("loading");
     track("ai_recommend_triggered_manual", { total: result.total });
-    setTimeout(() => {
-      setAiBoostState("done");
-      track("ai_generation_saved", { scene: "recommend_ai_boost" });
-    }, 1200);
+    onError("");
+    try {
+      const data = await fetchRecommendByIngredients(ingredients, { aiBoost: true });
+      setResult(data);
+      const aiFailed =
+        data.aiMeta?.triggeredBy === "manual_ai_boost_failed" || data.aiMeta?.triggeredBy === "db_miss_failed";
+      if (aiFailed) {
+        setAiBoostState("idle");
+        onError("AI 暂时无法生成新菜谱，已为你保留当前推荐结果。");
+        track("ai_recommend_boost_failed", { reason: data.aiMeta?.triggeredBy });
+        return;
+      }
+      if (data.source === "ai_generated" || data.source === "mixed") {
+        setAiBoostState("done");
+        if (data.source === "mixed") setResultListTab("ai");
+        track("ai_recommend_boost_loaded", { total: data.total, source: data.source });
+        if (data.aiMeta?.generationSaved) {
+          track("ai_generation_saved", { scene: "recommend_ai_boost" });
+        }
+      } else {
+        setAiBoostState("idle");
+      }
+    } catch (error) {
+      setAiBoostState("idle");
+      onError(`AI 推荐失败: ${(error as Error).message}`);
+      track("ai_recommend_boost_failed", { message: (error as Error).message });
+    }
   }
 
   return (
@@ -146,6 +216,11 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
         >
           <Text style={styles.primaryButtonText}>{loading ? "查询中..." : "查询推荐"}</Text>
         </Pressable>
+        {canReset ? (
+          <Pressable style={styles.resetButton} onPress={resetRecommendState} hitSlop={8}>
+            <Text style={styles.resetButtonText}>重置查询</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {!searched && !result?.list?.length && (
@@ -165,7 +240,11 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
       {!!result?.list?.length && (
         <View style={styles.resultSection}>
           <View style={styles.resultHeadRow}>
-            <Text style={styles.resultCount}>找到 {aiEnhancedList.length} 个匹配菜谱</Text>
+            <Text style={styles.resultCount}>
+              {isMixedResult
+                ? `共 ${result.list.length} 道（AI ${sortedAiList.length} · 菜谱库 ${sortedLibraryList.length}）`
+                : `找到 ${sortedList.length} 个匹配菜谱`}
+            </Text>
             {aiBoostState === "idle" && (
               <Pressable style={styles.aiBoostButton} onPress={onAiBoost}>
                 <Text style={styles.aiBoostIcon}>✧</Text>
@@ -179,6 +258,26 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
               </View>
             )}
           </View>
+          {isMixedResult ? (
+            <View style={styles.subTabRow}>
+              <Pressable
+                style={[styles.subTab, resultListTab === "ai" && styles.subTabActive]}
+                onPress={() => setResultListTab("ai")}
+              >
+                <Text style={[styles.subTabText, resultListTab === "ai" && styles.subTabTextActive]}>
+                  AI 推荐 ({sortedAiList.length})
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.subTab, resultListTab === "library" && styles.subTabActive]}
+                onPress={() => setResultListTab("library")}
+              >
+                <Text style={[styles.subTabText, resultListTab === "library" && styles.subTabTextActive]}>
+                  菜谱库 ({sortedLibraryList.length})
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
           <View style={styles.sortRow}>
             <Pressable style={[styles.sortButton, sortMode === "match" && styles.sortButtonActive]} onPress={() => setSortMode("match")}>
               <Text style={[styles.sortButtonText, sortMode === "match" && styles.sortButtonTextActive]}>匹配优先</Text>
@@ -201,7 +300,9 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
       )}
 
       {aiBoostState !== "loading" &&
-        (aiBoostState === "idle" ? sortedList : aiEnhancedList).map((item, index) => (
+        displayList.map((item) => {
+          const { main: missingMainNames, secondary: missingSecondaryNames } = partitionMissingByRole(item.missingIngredients);
+          return (
           <View key={item.dishId} style={styles.resultCard}>
             <View style={styles.resultHead}>
               <Text style={styles.resultTitle}>{item.dishName}</Text>
@@ -216,19 +317,21 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
               </Pressable>
             </View>
             <Text style={styles.matchText}>↗ 匹配度 {(item.matchScore * 100).toFixed(0)}%</Text>
-            {aiBoostState === "done" && (
+            {!isMixedResult ? (
               <View style={styles.aiTagRow}>
-                <View style={styles.aiTag}>
-                  <Text style={styles.aiTagIcon}>✧</Text>
-                  <Text style={styles.aiTagText}>AI增强</Text>
-                </View>
-                {index === 1 && (
-                  <View style={styles.aiVerifiedTag}>
-                    <Text style={styles.aiVerifiedTagText}>已校验</Text>
+                {listEntryOrigin(item) === "ai" ? (
+                  <View style={styles.aiTag}>
+                    <Text style={styles.aiTagIcon}>✧</Text>
+                    <Text style={styles.aiTagText}>AI 生成</Text>
+                  </View>
+                ) : (
+                  <View style={styles.dbTag}>
+                    <Text style={styles.dbTagIcon}>📖</Text>
+                    <Text style={styles.dbTagText}>菜谱库</Text>
                   </View>
                 )}
               </View>
-            )}
+            ) : null}
             <View style={styles.metaChipRow}>
               <View style={[styles.metaChip, styles.metaDifficultyBg]}>
                 <Text style={[styles.metaChipText, styles.metaDifficultyText]}>🍃 {mapDifficulty(item.difficulty)}</Text>
@@ -247,15 +350,40 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
             </View>
             {!!item.missingIngredients.length && (
               <View style={styles.missingCard}>
-                <Text style={styles.missingLabel}>还需准备：</Text>
-                <Text style={styles.missingValue}>{item.missingIngredients.join("、")}</Text>
+                <Text style={styles.missingLabel}>还需准备</Text>
+                <View style={styles.missingByRoleBlock}>
+                  {missingMainNames.length > 0 ? (
+                    <View style={styles.missingRoleRow}>
+                      <Text style={styles.missingRoleTag}>主料</Text>
+                      <Text style={styles.missingValue}>{missingMainNames.join("、")}</Text>
+                    </View>
+                  ) : null}
+                  {missingSecondaryNames.length > 0 ? (
+                    <View style={styles.missingRoleRow}>
+                      <Text style={styles.missingRoleTag}>辅料</Text>
+                      <Text style={styles.missingValue}>{missingSecondaryNames.join("、")}</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
             )}
-            <Pressable style={styles.openButton} onPress={() => onOpenDish({ dishId: item.dishId, dishName: item.dishName })}>
+            <Pressable
+              style={styles.openButton}
+              onPress={() =>
+                onOpenDish({
+                  dishId: item.dishId,
+                  dishName: item.dishName,
+                  cookTimeMinutes: item.cookTimeMinutes,
+                  difficulty: item.difficulty,
+                  videos: item.videos,
+                })
+              }
+            >
               <Text style={styles.openButtonText}>查看做法</Text>
             </Pressable>
           </View>
-        ))}
+          );
+        })}
     </View>
   );
 }
@@ -332,6 +460,16 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
   buttonDisabled: { opacity: 0.5 },
+  resetButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
+    backgroundColor: "#fff",
+  },
+  resetButtonText: { color: "#757575", fontSize: 14, fontWeight: "500" },
   tipCard: {
     backgroundColor: "#fff3e0",
     borderRadius: 16,
@@ -354,7 +492,24 @@ const styles = StyleSheet.create({
   emptyDesc: { color: "#757575", fontSize: 14, lineHeight: 22 },
   resultSection: { gap: 10 },
   resultHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  resultCount: { color: "#757575", fontSize: 14 },
+  resultCount: { color: "#757575", fontSize: 13, flex: 1, paddingRight: 8 },
+  subTabRow: {
+    flexDirection: "row",
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    padding: 4,
+    gap: 4,
+  },
+  subTab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  subTabActive: { backgroundColor: "#fff", shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+  subTabText: { fontSize: 14, color: "#757575", fontWeight: "500" },
+  subTabTextActive: { color: "#8200db" },
   aiBoostButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -419,6 +574,19 @@ const styles = StyleSheet.create({
   },
   aiTagIcon: { color: "#8200db", fontSize: 11 },
   aiTagText: { color: "#8200db", fontSize: 12 },
+  dbTag: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(78,205,196,0.5)",
+    backgroundColor: "rgba(78,205,196,0.12)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  dbTagIcon: { fontSize: 11 },
+  dbTagText: { color: "#2a9d8f", fontSize: 12, fontWeight: "500" },
   aiVerifiedTag: {
     borderRadius: 999,
     borderWidth: 1,
@@ -451,7 +619,15 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   missingLabel: { color: "#ffb84d", fontSize: 12 },
-  missingValue: { color: "#1a1a1a", fontSize: 14 },
+  missingByRoleBlock: { gap: 6, marginTop: 2 },
+  missingRoleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 6 },
+  missingRoleTag: {
+    color: "#c2410c",
+    fontSize: 12,
+    fontWeight: "700",
+    paddingTop: 1,
+  },
+  missingValue: { color: "#1a1a1a", fontSize: 14, flex: 1, flexShrink: 1 },
   openButton: {
     borderRadius: 10,
     backgroundColor: "#fff3e0",

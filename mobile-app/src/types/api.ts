@@ -6,19 +6,47 @@ export type VideoItem = {
   likeCount?: number;
 };
 
+/** 推荐列表中的缺料项（不含调料） */
+export type MissingIngredientItem = {
+  name: string;
+  role: "main" | "secondary";
+};
+
 export type RecommendItem = {
   dishId: string;
   dishName: string;
   matchScore: number;
   cookTimeMinutes: number;
   difficulty: number;
-  missingIngredients: string[];
+  missingIngredients: MissingIngredientItem[];
   videos: VideoItem[];
+  /** 列表合并时：菜谱库匹配 vs AI 生成 */
+  entrySource?: "db" | "ai";
+};
+
+/** 从列表进入详情时携带的已知字段，用于首屏秒开 */
+export type DishDetailPrefetch = {
+  dishId: string;
+  dishName: string;
+  cookTimeMinutes?: number;
+  difficulty?: number;
+  videos?: VideoItem[];
+};
+
+export type RecommendAiMeta = {
+  used?: boolean;
+  triggeredBy?: string;
+  generationSaved?: boolean;
 };
 
 export type RecommendResponse = {
   list: RecommendItem[];
   total: number;
+  page?: number;
+  pageSize?: number;
+  source?: "db" | "ai_generated" | "mixed";
+  aiMeta?: RecommendAiMeta;
+  actions?: Array<{ actionType: string; text: string }>;
 };
 
 export type DishResponse = {

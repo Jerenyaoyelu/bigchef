@@ -10,12 +10,17 @@ datasource db {
 model Dish {
   id              String           @id
   name            String
+  description     String?
+  sourceType      String           @default("manual")
+  status          String           @default("published")
   cookTimeMinutes Int?
   difficulty      Int?
   tasteTags       Json             @default("[]")
   stepsSummary    Json             @default("[]")
+  aiResults       AiGenerationResult[]
   ingredients     DishIngredient[]
   videos          Video[]
+  videoRequest    VideoRequestDemand?
   favorites       UserFavorite[]
   viewHistories   UserHistory[]
 }
@@ -71,4 +76,81 @@ model UserHistory {
 
   @@index([userId, viewedAt])
   @@unique([userId, dishId])
+}
+
+model AuthSmsCode {
+  id          String   @id @default(cuid())
+  phone       String
+  code        String
+  expiredAt   DateTime
+  verifiedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model AuthSession {
+  id                String   @id @default(cuid())
+  userId            String
+  phone             String
+  accessToken       String   @unique
+  refreshToken      String   @unique
+  accessExpiredAt   DateTime
+  refreshExpiredAt  DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model VideoRequestDemand {
+  dishId               String   @id
+  totalRequests        Int      @default(0)
+  uniqueRequestUsers   Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  dish                 Dish     @relation(fields: [dishId], references: [id])
+}
+
+model VideoRequestRecord {
+  id               String   @id @default(cuid())
+  dishId           String
+  requesterKey     String
+  firstRequestedAt DateTime @default(now())
+  lastRequestedAt  DateTime @default(now())
+  requestCount     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([dishId, requesterKey])
+  @@index([dishId, lastRequestedAt])
+}
+
+model AiGenerationTask {
+  id               String   @id @default(cuid())
+  sceneType        String
+  normalizedQuery  String
+  queryHash        String
+  status           String   @default("pending")
+  model            String?
+  latencyMs        Int?
+  errorCode        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  results          AiGenerationResult[]
+
+  @@unique([sceneType, queryHash])
+  @@index([sceneType, status, createdAt])
+}
+
+model AiGenerationResult {
+  id               String           @id @default(cuid())
+  taskId           String
+  dishId           String
+  score            Float?
+  validationResult String?
+  rawJson          Json?
+  createdAt        DateTime         @default(now())
+  task             AiGenerationTask @relation(fields: [taskId], references: [id])
+  dish             Dish             @relation(fields: [dishId], references: [id])
+
+  @@unique([taskId, dishId])
 }
