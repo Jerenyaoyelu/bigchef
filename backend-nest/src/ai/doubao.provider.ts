@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { AiGenerationError } from "./ai-generation.error";
 import { GeneratedDish, LlmProvider, StepSummaryResult } from "./llm.provider";
+import { normalizeRoleFromModel } from "./ingredient-role.util";
 import { summarizeStepsWithRules } from "./local-step-rules";
 
 @Injectable()
@@ -86,7 +87,7 @@ export class DoubaoProvider implements LlmProvider {
         "覆盖规则（重要）：输出的多道菜作为一个整体，应让用户给出的每一种食材至少在某一道菜里被使用到（作主辅料均可）；单道菜可以只用其中一部分食材，甚至一道菜只突出一种主料也可以。",
         "若某几种食材更适合拆成不同菜（例如一道偏荤、一道偏素），请这样分配，比强行大乱炖更受欢迎。",
         "dishName 须为真实、常见的具体菜名，2～14 个汉字为宜；严禁「快手菜1/2/3」、方案编号、占位、测试等敷衍命名。",
-        "ingredients：写出该道菜实际用到的料；用户已有但未在本道菜使用的食材不要写进这道菜。用户没有而菜谱需要的配料写在 ingredients 里，并设 optional:true（或按常理标注）。",
+        "ingredients：写出该道菜实际用到的料；用户已有但未在本道菜使用的不要写进本道菜；用户没有而菜谱需要的料仍写在 ingredients 里。每项必填 role（main|secondary|seasoning）：main=主料蛋白或主体蔬菜；secondary=配菜、葱姜蒜、淀粉蛋清等上浆腌制料；seasoning=盐糖酱油醋料酒蚝油豆瓣酱干辣椒花椒八角等调料与干香料。不要把盐糖酱油写在 secondary 导致 seasoning 为空。optional 仅表示「用户家里可能缺、需采购」，与 role 无关。",
         "missingIngredients：仅填「做这道菜还需要、且不在用户已给食材列表里」的料（用户缺的采购项）；用户已拥有的食材不要出现在 missingIngredients。",
         "steps 写 3～8 条，每条一句，可操作、面向新手；步骤里若写明了加热/焖炖时间（如「炖20分钟」），须与 cookTimeMinutes 一致。",
         "cookTimeMinutes：必填整数（分钟），表示从备料完成到可装盘食用的总耗时，须与步骤描述相符，不要固定写 20。可参考：快炒/小炒类多 12～28 分钟；烧焖炖煲类多 35～75 分钟；简单汤羹 25～50 分钟；凉拌/快手素菜可 15～25 分钟。上限一般不超过 90，除非步骤明确长时间炖煮。",
@@ -98,7 +99,15 @@ export class DoubaoProvider implements LlmProvider {
         dishes: [
           {
             dishName: "string",
-            ingredients: [{ name: "string", amount: "string", unit: "string", optional: false }],
+            ingredients: [
+              {
+                name: "string",
+                amount: "string",
+                unit: "string",
+                role: "main",
+                optional: false,
+              },
+            ],
             steps: ["string"],
             cookTimeMinutes: 20,
             difficulty: 2,
@@ -158,11 +167,21 @@ export class DoubaoProvider implements LlmProvider {
     }
     const prompt = {
       scene: "search_dish_by_name",
+      instructions: [
+        "按中餐习惯拆分食材。ingredients 每一项必填 role，取值 main|secondary|seasoning：",
+        "main：菜名对应的主体料（如肉片、鱼块、鸡丁、豆腐主料等）。",
+        "secondary：配菜、豆芽白菜等配锅料，以及葱姜片蒜、淀粉、蛋清等加工辅料。",
+        "seasoning：盐、糖、生抽老抽、料酒、醋、蚝油、豆瓣酱、干辣椒花椒八角桂皮香叶、鸡精味精等；不要把它们放进 secondary。",
+        "optional 只表示家庭是否常备、是否需采购，与分类无关；必备盐酱油也必须 role=seasoning。",
+        "调味料通常多条，seasoning 不得为空数组。",
+      ],
       normalizedDishName: input.normalizedDishName,
       outputSchema: {
         dish: {
           dishName: "string",
-          ingredients: [{ name: "string", amount: "string", unit: "string", optional: false }],
+          ingredients: [
+            { name: "string", amount: "string", unit: "string", role: "seasoning", optional: false },
+          ],
           steps: ["string"],
           cookTimeMinutes: 20,
           difficulty: 2,
@@ -172,7 +191,11 @@ export class DoubaoProvider implements LlmProvider {
     };
     let content: string;
     try {
-      content = await this.chatJson(prompt, "仅返回JSON对象，禁止Markdown。", "generateDishByName");
+      content = await this.chatJson(
+        prompt,
+        "仅返回JSON对象，禁止Markdown。ingredients 每项必须含合法 role 字段。",
+        "generateDishByName",
+      );
     } catch (err) {
       this.logger.error(
         `[generateDishByName] 请求失败: ${err instanceof Error ? err.message : String(err)}`,
@@ -261,6 +284,7 @@ export class DoubaoProvider implements LlmProvider {
               name: this.cleanText(v?.name),
               amount: this.cleanText(v?.amount),
               unit: this.cleanText(v?.unit),
+              role: normalizeRoleFromModel(v?.role),
               optional: !!v?.optional,
             }))
             .filter((v: { name: string }) => !!v.name)

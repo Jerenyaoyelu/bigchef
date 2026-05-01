@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { AiGenerationError } from "../ai/ai-generation.error";
+import { looksLikeSeasoningByName } from "../ai/ingredient-role.util";
 import { LlmProvider } from "../ai/llm.provider";
 import { RecipeGenerationService } from "../ai/recipe-generation.service";
 import { PrismaService } from "../database/prisma.service";
@@ -230,9 +231,13 @@ export class DishesService {
     const grouped = { main: [] as string[], secondary: [] as string[], seasoning: [] as string[] };
     for (const item of dish.ingredients) {
       const content = item.amountText ? `${item.ingredient.name} ${item.amountText}` : item.ingredient.name;
-      if (item.role === "main") grouped.main.push(content);
-      if (item.role === "secondary") grouped.secondary.push(content);
-      if (item.role === "seasoning") grouped.seasoning.push(content);
+      const name = item.ingredient.name;
+      let role: "main" | "secondary" | "seasoning" =
+        item.role === "main" || item.role === "secondary" || item.role === "seasoning" ? item.role : "secondary";
+      if (looksLikeSeasoningByName(name)) role = "seasoning";
+      if (role === "main") grouped.main.push(content);
+      if (role === "secondary") grouped.secondary.push(content);
+      if (role === "seasoning") grouped.seasoning.push(content);
     }
 
     const { steps, summarySource } = await this.resolveStepsSummary(dish.id, dish.name, dish.stepsSummary);

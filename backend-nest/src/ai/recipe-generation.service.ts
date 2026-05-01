@@ -3,10 +3,11 @@ import { createHash, randomUUID } from "crypto";
 import { AiGenerationError } from "./ai-generation.error";
 import { LlmProvider } from "./llm.provider";
 import { PrismaService } from "../database/prisma.service";
+import { resolvePersistIngredientRole } from "./ingredient-role.util";
 
 /** 参与 queryHash：策略/兜底逻辑变更时递增，避免继续命中历史缓存（如旧版本地假数据）。 */
-const RECOMMEND_CACHE_VERSION = "4";
-const SEARCH_DISH_CACHE_VERSION = "2";
+const RECOMMEND_CACHE_VERSION = "5";
+const SEARCH_DISH_CACHE_VERSION = "3";
 
 type StoredDish = {
   id: string;
@@ -210,7 +211,13 @@ export class RecipeGenerationService {
   private async persistGeneratedDish(
     dish: {
       dishName: string;
-      ingredients: Array<{ name: string; amount?: string; unit?: string; optional?: boolean }>;
+      ingredients: Array<{
+        name: string;
+        amount?: string;
+        unit?: string;
+        optional?: boolean;
+        role?: unknown;
+      }>;
       steps: string[];
       cookTimeMinutes?: number;
       difficulty?: number;
@@ -258,7 +265,10 @@ export class RecipeGenerationService {
             id: `di_${Date.now()}_${index}_${randomUUID().slice(0, 5)}`,
             dishId: insertedDish.id,
             ingredientId,
-            role: index === 0 ? "main" : ing.optional ? "seasoning" : "secondary",
+            role: resolvePersistIngredientRole(
+              { name: normalizedName, role: ing.role },
+              index,
+            ),
             amountText: [ing.amount, ing.unit].filter(Boolean).join(" ").trim() || null,
           },
         });

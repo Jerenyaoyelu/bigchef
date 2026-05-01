@@ -9,6 +9,9 @@ export type GeneratedDish = {
     name: string;
     amount?: string;
     unit?: string;
+    /** main=主料；secondary=配菜葱姜蒜淀粉蛋清等；seasoning=盐糖酱油料酒醋蚝油香料酱 */
+    role?: "main" | "secondary" | "seasoning";
+    /** 用户可能缺货需采购，与 role 无关 */
     optional?: boolean;
   }>;
   steps: string[];
