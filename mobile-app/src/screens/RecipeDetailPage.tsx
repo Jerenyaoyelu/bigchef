@@ -4,6 +4,7 @@ import { track } from "../analytics/tracker";
 import { CookingStepsCard } from "../features/dish/components/CookingStepsCard";
 import { VideoTutorialCard } from "../features/dish/components/VideoTutorialCard";
 import { fetchDishById } from "../features/dish/api/dishApi";
+import { useUserFoodStore } from "../store/userFoodStore";
 import { DishDetailPrefetch, DishResponse } from "../types/api";
 
 type RecipeDetailPageProps = {
@@ -24,6 +25,9 @@ export function RecipeDetailPage({
   onBack,
   onOpenDish,
 }: RecipeDetailPageProps) {
+  const likedDishIds = useUserFoodStore((s) => s.likedDishIds);
+  const likeCountByDish = useUserFoodStore((s) => s.likeCountByDish);
+  const toggleDishLike = useUserFoodStore((s) => s.toggleDishLike);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DishResponse | null>(null);
   const [error, setError] = useState("");
@@ -59,6 +63,8 @@ export function RecipeDetailPage({
 
   const headerTitle = result?.dishName ?? preview?.dishName ?? "菜谱详情";
   const isFavorite = useMemo(() => favoriteDishIds.includes(dishId), [favoriteDishIds, dishId]);
+  const detailLikeCount = likeCountByDish[dishId] ?? result?.likeCount ?? 0;
+  const detailLiked = likedDishIds.includes(dishId);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -69,16 +75,29 @@ export function RecipeDetailPage({
         <Text numberOfLines={1} style={styles.headerTitle}>
           {headerTitle}
         </Text>
-        <Pressable
-          style={styles.headerIconButton}
-          onPress={() => {
-            const name = result?.dishName ?? preview?.dishName;
-            if (!name) return;
-            onToggleFavorite({ dishId, dishName: name });
-          }}
-        >
-          <Text style={[styles.headerIcon, isFavorite && styles.favoriteActive]}>{isFavorite ? "♥" : "♡"}</Text>
-        </Pressable>
+        <View style={styles.headerRightActions}>
+          <Pressable
+            style={styles.headerLikePressable}
+            onPress={async () => {
+              setError("");
+              const res = await toggleDishLike(dishId);
+              if (res && result) setResult({ ...result, likeCount: res.likeCount });
+              if (!res) setError("点赞失败，请稍后重试");
+            }}
+          >
+            <Text style={[styles.headerLikeText, detailLiked && styles.likeActive]}>👍 {detailLikeCount}</Text>
+          </Pressable>
+          <Pressable
+            style={styles.headerIconButton}
+            onPress={() => {
+              const name = result?.dishName ?? preview?.dishName;
+              if (!name) return;
+              onToggleFavorite({ dishId, dishName: name });
+            }}
+          >
+            <Text style={[styles.headerIcon, isFavorite && styles.favoriteActive]}>{isFavorite ? "♥" : "♡"}</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -124,6 +143,16 @@ export function RecipeDetailPage({
               <View style={styles.baseMeta}>
                 <Text style={styles.baseMetaText}>◷ {result.cookTimeMinutes ?? 20}分钟</Text>
                 <Text style={styles.baseMetaText}>👨‍🍳 {mapDifficulty(result.difficulty)}</Text>
+                <Pressable
+                  onPress={async () => {
+                    setError("");
+                    const res = await toggleDishLike(dishId);
+                    if (res) setResult({ ...result, likeCount: res.likeCount });
+                    if (!res) setError("点赞失败，请稍后重试");
+                  }}
+                >
+                  <Text style={[styles.baseMetaText, detailLiked && styles.likeActive]}>👍 {detailLikeCount}</Text>
+                </Pressable>
               </View>
             </View>
 
@@ -194,10 +223,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
   },
+  headerRightActions: { flexDirection: "row", alignItems: "center", flexShrink: 0, gap: 2 },
+  headerLikePressable: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minHeight: 36,
+    justifyContent: "center",
+    borderRadius: 18,
+  },
+  headerLikeText: { fontSize: 15, color: "#1a1a1a", fontWeight: "600" },
   headerIconButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 18 },
   headerIcon: { fontSize: 24, color: "#1a1a1a" },
   favoriteActive: { color: "#ff6b35" },
-  headerTitle: { fontSize: 22, color: "#1a1a1a", fontWeight: "600", maxWidth: "70%" },
+  likeActive: { color: "#ff6b35" },
+  headerTitle: { flex: 1, fontSize: 22, color: "#1a1a1a", fontWeight: "600", marginHorizontal: 8, minWidth: 0 },
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24, gap: 12 },
   errorText: { color: "#b91c1c", fontSize: 13 },
   loadingWrap: {

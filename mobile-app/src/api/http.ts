@@ -1,7 +1,8 @@
 import { useAppConfigStore } from "../store/appConfigStore";
+import { useSessionStore } from "../store/sessionStore";
 
 function getRequestHeaders() {
-  const { userId } = useAppConfigStore.getState();
+  const userId = useSessionStore.getState().getEffectiveUserId();
   return {
     "Content-Type": "application/json",
     ...(userId ? { "x-user-id": userId } : {}),
@@ -44,4 +45,3 @@ export async function deleteJson<T>(path: string): Promise<T> {
   }
   return (await response.json()) as T;
 }
-

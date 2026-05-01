@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSessionStore } from "../../../store/sessionStore";
+import { useUserFoodStore } from "../../../store/userFoodStore";
 
 type FavoriteDish = {
   dishId: string;
@@ -34,6 +36,8 @@ export function ProfileSection({
   onToggleFavorite,
   onClearRecentViews,
 }: ProfileSectionProps) {
+  const setAuthUserId = useSessionStore((s) => s.setAuthUserId);
+  const hydrateFromServer = useUserFoodStore((s) => s.hydrateFromServer);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [profileFlow, setProfileFlow] = useState<ProfileFlow>("overview");
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -99,12 +103,16 @@ export function ProfileSection({
       return;
     }
     setLoginFormError("");
+    setAuthUserId(`user_${phone}`);
+    void hydrateFromServer();
     setIsLoggedIn(true);
     setShowLoginToast(true);
     setProfileFlow("migrating");
   }
 
   function onLogout() {
+    setAuthUserId(null);
+    void hydrateFromServer();
     setIsLoggedIn(false);
     setPhone("");
     setCode("");

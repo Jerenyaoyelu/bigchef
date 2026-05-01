@@ -13,3 +13,7 @@ export async function fetchDishById(dishId: string) {
   return getJson<DishResponse>(`/api/v1/dishes/${dishId}`);
 }
 
+export async function toggleDishLike(dishId: string) {
+  return postJson<{ liked: boolean; likeCount: number }>(`/api/v1/dishes/${dishId}/like`, {});
+}
+

@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { toggleDishLike as toggleDishLikeApi } from "../features/dish/api/dishApi";
 import {
   addFavorite as addFavoriteApi,
   addHistory as addHistoryApi,
   clearHistory as clearHistoryApi,
+  fetchDishLikes,
   fetchFavorites,
   fetchHistory,
   removeFavorite as removeFavoriteApi,
@@ -24,9 +26,13 @@ type RecentDish = {
 
 type UserFoodState = {
   favorites: FavoriteDish[];
+  likedDishIds: string[];
+  /** 点赞接口返回后的展示用总数（含视频赞），以服务端为准 */
+  likeCountByDish: Record<string, number>;
   recentViews: RecentDish[];
   hydrateFromServer: () => Promise<void>;
   toggleFavorite: (dish: FavoriteDish) => Promise<void>;
+  toggleDishLike: (dishId: string) => Promise<{ liked: boolean; likeCount: number } | null>;
   addRecentView: (dish: FavoriteDish) => Promise<void>;
   clearRecentViews: () => Promise<void>;
 };
@@ -37,22 +43,31 @@ export const useUserFoodStore = create<UserFoodState>()(
   persist(
     (set, get) => ({
       favorites: [],
+      likedDishIds: [],
+      likeCountByDish: {},
       recentViews: [],
       hydrateFromServer: async () => {
-        try {
-          const [favoritesData, historyData] = await Promise.all([fetchFavorites(), fetchHistory(MAX_RECENT)]);
-          set({
-            favorites: favoritesData.list.map((item) => ({ dishId: item.dishId, dishName: item.dishName })),
-            recentViews: historyData.list.map((item) => ({
-              dishId: item.dishId,
-              dishName: item.dishName,
-              viewedAt: item.viewedAt,
-              difficulty: item.difficulty,
-            })),
-          });
-        } catch {
-          // keep local cache when remote service is unavailable
-        }
+        const [favResult, histResult, likesResult] = await Promise.allSettled([
+          fetchFavorites(),
+          fetchHistory(MAX_RECENT),
+          fetchDishLikes(),
+        ]);
+        set((state) => ({
+          favorites:
+            favResult.status === "fulfilled"
+              ? favResult.value.list.map((item) => ({ dishId: item.dishId, dishName: item.dishName }))
+              : state.favorites,
+          recentViews:
+            histResult.status === "fulfilled"
+              ? histResult.value.list.map((item) => ({
+                  dishId: item.dishId,
+                  dishName: item.dishName,
+                  viewedAt: item.viewedAt,
+                  difficulty: item.difficulty,
+                }))
+              : state.recentViews,
+          likedDishIds: likesResult.status === "fulfilled" ? likesResult.value.dishIds : state.likedDishIds,
+        }));
       },
       toggleFavorite: async (dish) => {
         const exists = get().favorites.some((fav) => fav.dishId === dish.dishId);
@@ -76,6 +91,20 @@ export const useUserFoodStore = create<UserFoodState>()(
             }
             return { favorites: state.favorites.filter((fav) => fav.dishId !== dish.dishId) };
           });
+        }
+      },
+      toggleDishLike: async (dishId: string) => {
+        try {
+          const res = await toggleDishLikeApi(dishId);
+          set((state) => ({
+            likedDishIds: res.liked
+              ? [...new Set([...state.likedDishIds, dishId])]
+              : state.likedDishIds.filter((id) => id !== dishId),
+            likeCountByDish: { ...state.likeCountByDish, [dishId]: res.likeCount },
+          }));
+          return res;
+        } catch {
+          return null;
         }
       },
       addRecentView: async (dish) => {
@@ -106,6 +135,7 @@ export const useUserFoodStore = create<UserFoodState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         favorites: state.favorites,
+        likedDishIds: state.likedDishIds,
         recentViews: state.recentViews,
       }),
     }

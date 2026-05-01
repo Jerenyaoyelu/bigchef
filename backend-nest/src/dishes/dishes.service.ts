@@ -64,6 +64,48 @@ export class DishesService {
     }
   }
 
+  /** 切换当前用户对菜谱的点赞（与关联视频赞合并前的 dishLikeCount 同步增减） */
+  async toggleDishLike(dishId: string, userId: string) {
+    const dishRow = await this.prisma.dish.findUnique({ where: { id: dishId }, select: { id: true } });
+    if (!dishRow) {
+      throw new NotFoundException("菜谱不存在。");
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.userDishLike.findUnique({
+          where: { userId_dishId: { userId, dishId } },
+        });
+
+        if (existing) {
+          await tx.userDishLike.delete({ where: { userId_dishId: { userId, dishId } } });
+          const d = await tx.dish.findUnique({ where: { id: dishId }, select: { dishLikeCount: true } });
+          const next = Math.max(0, (d?.dishLikeCount ?? 0) - 1);
+          await tx.dish.update({ where: { id: dishId }, data: { dishLikeCount: next } });
+        } else {
+          await tx.userDishLike.create({ data: { userId, dishId } });
+          await tx.dish.update({ where: { id: dishId }, data: { dishLikeCount: { increment: 1 } } });
+        }
+
+        const full = await tx.dish.findUnique({
+          where: { id: dishId },
+          include: { videos: true },
+        });
+        if (!full) {
+          throw new NotFoundException("菜谱不存在。");
+        }
+        const videoSum = full.videos.reduce((s, v) => s + (v.likeCount ?? 0), 0);
+        const likeCount = (full.dishLikeCount ?? 0) + videoSum;
+        const liked = !existing;
+        return { liked, likeCount };
+      });
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      this.logger.error(`toggleDishLike failed dishId=${dishId}`, error instanceof Error ? error.stack : String(error));
+      throw new ServiceUnavailableException("点赞服务暂时不可用，请稍后重试。");
+    }
+  }
+
   async requestVideoUpdate(dishId: string, payload: RequestVideoDto) {
     const db = this.prisma as any;
     const dish = await this.prisma.dish.findUnique({ where: { id: dishId }, select: { id: true } });
@@ -165,6 +207,7 @@ export class DishesService {
     dish: {
     id: string;
     name: string;
+    dishLikeCount?: number | null;
     cookTimeMinutes: number | null;
     difficulty: number | null;
     stepsSummary: unknown;
@@ -193,10 +236,13 @@ export class DishesService {
     }
 
     const { steps, summarySource } = await this.resolveStepsSummary(dish.id, dish.name, dish.stepsSummary);
+    const videoLikeSum = dish.videos.reduce((s, v) => s + (v.likeCount ?? 0), 0);
+    const likeCount = (dish.dishLikeCount ?? 0) + videoLikeSum;
 
     return {
       dishId: dish.id,
       dishName: dish.name,
+      likeCount,
       cookTimeMinutes: dish.cookTimeMinutes ?? 20,
       difficulty: dish.difficulty ?? 2,
       ingredients: grouped,

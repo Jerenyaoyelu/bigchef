@@ -50,6 +50,19 @@ export class ProfileService {
     }
   }
 
+  async getDishLikes(userId = DEFAULT_USER_ID) {
+    try {
+      const rows = await this.prisma.userDishLike.findMany({
+        where: { userId },
+        select: { dishId: true },
+        orderBy: { createdAt: "desc" },
+      });
+      return { dishIds: rows.map((r) => r.dishId) };
+    } catch {
+      throw new ServiceUnavailableException("点赞列表暂时不可用，请稍后重试。");
+    }
+  }
+
   async removeFavorite(dishId: string, userId = DEFAULT_USER_ID) {
     try {
       await this.prisma.userFavorite.deleteMany({ where: { userId, dishId } });

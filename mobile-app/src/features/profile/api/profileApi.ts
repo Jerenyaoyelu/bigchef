@@ -1,6 +1,14 @@
 import { deleteJson, getJson, postJson } from "../../../api/http";
 import { FavoritesResponse, HistoryResponse } from "../../../types/api";
 
+export type DishLikesResponse = {
+  dishIds: string[];
+};
+
+export function fetchDishLikes() {
+  return getJson<DishLikesResponse>("/api/v1/user/dish-likes");
+}
+
 export function fetchFavorites() {
   return getJson<FavoritesResponse>("/api/v1/user/favorites");
 }

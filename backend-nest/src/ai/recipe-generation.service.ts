@@ -11,6 +11,7 @@ const SEARCH_DISH_CACHE_VERSION = "2";
 type StoredDish = {
   id: string;
   name: string;
+  dishLikeCount?: number | null;
   cookTimeMinutes: number | null;
   difficulty: number | null;
   stepsSummary: unknown;
@@ -26,6 +27,7 @@ type StoredDish = {
     durationSec: number | null;
     likeCount: number | null;
   }>;
+  _count?: { favorites: number };
 };
 
 @Injectable()
@@ -286,7 +288,11 @@ export class RecipeGenerationService {
     if (!ids.length) return [];
     const rows = await this.prisma.dish.findMany({
       where: { id: { in: ids } },
-      include: { ingredients: { include: { ingredient: true } }, videos: true },
+      include: {
+        ingredients: { include: { ingredient: true } },
+        videos: true,
+        _count: { select: { favorites: true } },
+      },
     });
     const map = new Map(rows.map((row) => [row.id, row]));
     return ids.map((id) => map.get(id)).filter(Boolean) as StoredDish[];

@@ -20,6 +20,8 @@ export type RecommendItem = {
   difficulty: number;
   missingIngredients: MissingIngredientItem[];
   videos: VideoItem[];
+  /** 菜谱点赞 + 关联视频点赞合计 */
+  likeCount?: number;
   /** 列表合并时：菜谱库匹配 vs AI 生成 */
   entrySource?: "db" | "ai";
 };
@@ -37,6 +39,8 @@ export type RecommendAiMeta = {
   used?: boolean;
   triggeredBy?: string;
   generationSaved?: boolean;
+  /** 混合推荐时：菜谱库是否因条数上限被截断 */
+  dbListTruncated?: boolean;
 };
 
 export type RecommendResponse = {
@@ -44,6 +48,8 @@ export type RecommendResponse = {
   total: number;
   page?: number;
   pageSize?: number;
+  /** 仅 source=db 时：是否还有下一页（服务端分页） */
+  hasMore?: boolean;
   source?: "db" | "ai_generated" | "mixed";
   aiMeta?: RecommendAiMeta;
   actions?: Array<{ actionType: string; text: string }>;
@@ -52,6 +58,8 @@ export type RecommendResponse = {
 export type DishResponse = {
   dishId: string;
   dishName: string;
+  /** 菜谱点赞 + 关联视频点赞合计 */
+  likeCount?: number;
   cookTimeMinutes?: number;
   difficulty?: number;
   ingredients: {

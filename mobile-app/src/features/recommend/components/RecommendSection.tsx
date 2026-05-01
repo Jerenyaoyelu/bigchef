@@ -1,8 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { track } from "../../../analytics/tracker";
+import { useUserFoodStore } from "../../../store/userFoodStore";
 import { DishDetailPrefetch, MissingIngredientItem, RecommendItem, RecommendResponse } from "../../../types/api";
 import { fetchRecommendByIngredients } from "../api/recommendApi";
+
+const DB_PAGE_SIZE = 5;
+const MIXED_LIBRARY_PAGE_SIZE = 5;
 
 type RecommendSectionProps = {
   onError: (message: string) => void;
@@ -12,6 +16,9 @@ type RecommendSectionProps = {
 };
 
 export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish }: RecommendSectionProps) {
+  const likedDishIds = useUserFoodStore((s) => s.likedDishIds);
+  const likeCountByDish = useUserFoodStore((s) => s.likeCountByDish);
+  const toggleDishLike = useUserFoodStore((s) => s.toggleDishLike);
   const [ingredients, setIngredients] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
@@ -21,7 +28,14 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
   const [aiBoostState, setAiBoostState] = useState<"idle" | "loading" | "done">("idle");
   /** 混合结果时：先展示 AI；仅 mixed 时使用 */
   const [resultListTab, setResultListTab] = useState<"ai" | "library">("ai");
+  const [loadingMoreDb, setLoadingMoreDb] = useState(false);
+  /** 混合结果下「菜谱库」Tab 本地展开条数 */
+  const [libraryVisibleCount, setLibraryVisibleCount] = useState(MIXED_LIBRARY_PAGE_SIZE);
   const commonIngredients = ["鸡蛋", "西红柿", "土豆", "鸡肉", "猪肉", "牛肉", "白菜", "豆腐", "葱", "姜", "蒜", "青椒"];
+
+  useEffect(() => {
+    setLibraryVisibleCount(MIXED_LIBRARY_PAGE_SIZE);
+  }, [result?.source, result?.total]);
 
   function partitionMissingByRole(items: MissingIngredientItem[]) {
     const main = items.filter((i) => i.role === "main").map((i) => i.name);
@@ -60,8 +74,14 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
   const displayList = isMixedResult
     ? resultListTab === "ai"
       ? sortedAiList
-      : sortedLibraryList
+      : sortedLibraryList.slice(0, libraryVisibleCount)
     : sortedList;
+
+  const canLoadMoreDb = result?.source === "db" && result.hasMore === true && !loadingMoreDb;
+  const canExpandMixedLibrary =
+    isMixedResult &&
+    resultListTab === "library" &&
+    sortedLibraryList.length > libraryVisibleCount;
 
   function addIngredient(value: string) {
     const normalized = value.trim();
@@ -103,7 +123,7 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
     onError("");
     try {
       track("recommend_search_submitted", { ingredients });
-      const data = await fetchRecommendByIngredients(ingredients);
+      const data = await fetchRecommendByIngredients(ingredients, { page: 1, pageSize: DB_PAGE_SIZE });
       setResult(data);
       track("recommend_result_loaded", { total: data.total });
     } catch (error) {
@@ -125,8 +145,31 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
     setSortMode("match");
     setAiBoostState("idle");
     setResultListTab("ai");
+    setLoadingMoreDb(false);
     onError("");
     track("recommend_reset");
+  }
+
+  async function loadMoreDb() {
+    if (!result || result.source !== "db" || !result.hasMore || loadingMoreDb || !ingredients.length) return;
+    setLoadingMoreDb(true);
+    onError("");
+    try {
+      const nextPage = (result.page ?? 1) + 1;
+      const data = await fetchRecommendByIngredients(ingredients, { page: nextPage, pageSize: DB_PAGE_SIZE });
+      setResult((prev) => {
+        if (!prev || prev.source !== "db") return data;
+        return {
+          ...data,
+          list: [...prev.list, ...data.list],
+        };
+      });
+      track("recommend_db_load_more", { page: nextPage, added: data.list.length });
+    } catch (error) {
+      onError(`加载更多失败: ${(error as Error).message}`);
+    } finally {
+      setLoadingMoreDb(false);
+    }
   }
 
   async function onAiBoost() {
@@ -243,7 +286,9 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
             <Text style={styles.resultCount}>
               {isMixedResult
                 ? `共 ${result.list.length} 道（AI ${sortedAiList.length} · 菜谱库 ${sortedLibraryList.length}）`
-                : `找到 ${sortedList.length} 个匹配菜谱`}
+                : result.source === "db"
+                  ? `找到 ${result.total} 个匹配菜谱${result.hasMore ? ` · 已显示 ${sortedList.length}` : ""}`
+                  : `找到 ${sortedList.length} 个匹配菜谱`}
             </Text>
             {aiBoostState === "idle" && (
               <Pressable style={styles.aiBoostButton} onPress={onAiBoost}>
@@ -299,22 +344,40 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
         </View>
       )}
 
-      {aiBoostState !== "loading" &&
-        displayList.map((item) => {
-          const { main: missingMainNames, secondary: missingSecondaryNames } = partitionMissingByRole(item.missingIngredients);
-          return (
-          <View key={item.dishId} style={styles.resultCard}>
+      {aiBoostState !== "loading"
+        ? displayList.map((item) => {
+            const { main: missingMainNames, secondary: missingSecondaryNames } = partitionMissingByRole(item.missingIngredients);
+            const displayLikeCount = likeCountByDish[item.dishId] ?? item.likeCount ?? 0;
+            const isLiked = likedDishIds.includes(item.dishId);
+            return (
+              <View key={item.dishId} style={styles.resultCard}>
             <View style={styles.resultHead}>
-              <Text style={styles.resultTitle}>{item.dishName}</Text>
-              <Pressable
-                onPress={() => onToggleFavorite({ dishId: item.dishId, dishName: item.dishName })}
-                hitSlop={6}
-                style={styles.favoriteButton}
-              >
-                <Text style={[styles.favoriteText, favoriteDishIds.includes(item.dishId) && styles.favoriteTextActive]}>
-                  {favoriteDishIds.includes(item.dishId) ? "♥" : "♡"}
-                </Text>
-              </Pressable>
+              <Text style={styles.resultTitle} numberOfLines={2}>
+                {item.dishName}
+              </Text>
+              <View style={styles.resultHeadActions}>
+                <Pressable
+                  style={[styles.likeBadge, isLiked && styles.likeBadgeActive]}
+                  hitSlop={8}
+                  onPress={async () => {
+                    track("recommend_dish_like_tap", { dishId: item.dishId });
+                    onError("");
+                    const res = await toggleDishLike(item.dishId);
+                    if (!res) onError("点赞失败，请稍后重试");
+                  }}
+                >
+                  <Text style={[styles.likeBadgeText, isLiked && styles.likeBadgeTextActive]}>👍 {displayLikeCount}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => onToggleFavorite({ dishId: item.dishId, dishName: item.dishName })}
+                  hitSlop={6}
+                  style={styles.favoriteButton}
+                >
+                  <Text style={[styles.favoriteText, favoriteDishIds.includes(item.dishId) && styles.favoriteTextActive]}>
+                    {favoriteDishIds.includes(item.dishId) ? "♥" : "♡"}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
             <Text style={styles.matchText}>↗ 匹配度 {(item.matchScore * 100).toFixed(0)}%</Text>
             {!isMixedResult ? (
@@ -381,9 +444,33 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
             >
               <Text style={styles.openButtonText}>查看做法</Text>
             </Pressable>
-          </View>
-          );
-        })}
+              </View>
+            );
+          })
+        : null}
+
+      {canLoadMoreDb ? (
+        <Pressable
+          style={[styles.loadMoreButton, loadingMoreDb && styles.loadMoreButtonDisabled]}
+          onPress={loadMoreDb}
+          disabled={loadingMoreDb}
+        >
+          <Text style={styles.loadMoreButtonText}>{loadingMoreDb ? "加载中…" : "更多菜谱"}</Text>
+        </Pressable>
+      ) : null}
+
+      {canExpandMixedLibrary ? (
+        <Pressable
+          style={styles.loadMoreButton}
+          onPress={() => setLibraryVisibleCount((n) => n + MIXED_LIBRARY_PAGE_SIZE)}
+        >
+          <Text style={styles.loadMoreButtonText}>更多菜谱</Text>
+        </Pressable>
+      ) : null}
+
+      {result?.source === "mixed" && result.aiMeta?.dbListTruncated ? (
+        <Text style={styles.truncateHint}>菜谱库较长，本次仅包含热度排名靠前的一部分。</Text>
+      ) : null}
     </View>
   );
 }
@@ -554,12 +641,35 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
   },
-  resultHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  resultTitle: { fontSize: 28 / 1.5, fontWeight: "600", color: "#1a1a1a", flex: 1 },
-  favoriteButton: { paddingHorizontal: 8, paddingVertical: 2 },
+  resultHead: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  resultTitle: { fontSize: 28 / 1.5, fontWeight: "600", color: "#1a1a1a", flex: 1, flexShrink: 1, paddingRight: 4 },
+  resultHeadActions: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
+  likeBadge: {
+    backgroundColor: "rgba(0,0,0,0.06)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  likeBadgeActive: {
+    backgroundColor: "rgba(255,107,53,0.15)",
+  },
+  likeBadgeText: { fontSize: 13, color: "#424242", fontWeight: "600" },
+  likeBadgeTextActive: { color: "#ff6b35" },
+  favoriteButton: { paddingHorizontal: 4, paddingVertical: 2 },
   favoriteText: { color: "#757575", fontSize: 22 },
   favoriteTextActive: { color: "#ff6b35" },
   matchText: { color: "#ff6b35", fontSize: 14 },
+  loadMoreButton: {
+    marginHorizontal: 4,
+    marginTop: 4,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,107,53,0.12)",
+    alignItems: "center",
+  },
+  loadMoreButtonDisabled: { opacity: 0.65 },
+  loadMoreButtonText: { color: "#ff6b35", fontWeight: "600", fontSize: 15 },
+  truncateHint: { color: "#9ca3af", fontSize: 12, textAlign: "center", marginTop: 4, paddingHorizontal: 8 },
   aiTagRow: { flexDirection: "row", gap: 6, marginTop: -2 },
   aiTag: {
     borderRadius: 999,

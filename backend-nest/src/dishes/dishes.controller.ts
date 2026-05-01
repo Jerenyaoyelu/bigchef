@@ -1,12 +1,27 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Headers, Post } from "@nestjs/common";
 import { Get, Param, Query } from "@nestjs/common";
+import { ProfileService } from "../profile/profile.service";
 import { RequestVideoDto } from "./dto/request-video.dto";
 import { SearchDishDto } from "./dto/search-dish.dto";
 import { DishesService } from "./dishes.service";
 
 @Controller("api/v1/dishes")
 export class DishesController {
-  constructor(private readonly dishesService: DishesService) {}
+  constructor(
+    private readonly dishesService: DishesService,
+    private readonly profileService: ProfileService,
+  ) {}
+
+  private userIdFrom(params: {
+    headerUserId?: string;
+    queryUserId?: string;
+    headerGuestId?: string;
+    queryGuestId?: string;
+  }) {
+    return this.profileService.resolveUserId(
+      params.headerUserId || params.queryUserId || params.headerGuestId || params.queryGuestId,
+    );
+  }
 
   @Post("search")
   search(@Body() payload: SearchDishDto) {
@@ -22,6 +37,20 @@ export class DishesController {
   @Get(":dishId")
   detail(@Param("dishId") dishId: string) {
     return this.dishesService.findById(dishId);
+  }
+
+  @Post(":dishId/like")
+  toggleLike(
+    @Param("dishId") dishId: string,
+    @Headers("x-user-id") headerUserId?: string,
+    @Query("userId") queryUserId?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
+  ) {
+    return this.dishesService.toggleDishLike(
+      dishId,
+      this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }),
+    );
   }
 
   @Post(":dishId/request-video")

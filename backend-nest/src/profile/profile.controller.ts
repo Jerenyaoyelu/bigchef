@@ -20,6 +20,16 @@ export class ProfileController {
     );
   }
 
+  @Get("dish-likes")
+  dishLikes(
+    @Headers("x-user-id") headerUserId?: string,
+    @Query("userId") queryUserId?: string,
+    @Headers("x-guest-id") headerGuestId?: string,
+    @Query("guestId") queryGuestId?: string,
+  ) {
+    return this.profileService.getDishLikes(this.userIdFrom({ headerUserId, queryUserId, headerGuestId, queryGuestId }));
+  }
+
   @Get("favorites")
   favorites(
     @Headers("x-user-id") headerUserId?: string,

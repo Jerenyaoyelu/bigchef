@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { ArrayMinSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Min } from "class-validator";
+import { ArrayMinSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 
 export class RecommendByIngredientsDto {
   @IsArray()
@@ -17,6 +17,7 @@ export class RecommendByIngredientsDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(50)
   pageSize = 10;
 
   @IsOptional()

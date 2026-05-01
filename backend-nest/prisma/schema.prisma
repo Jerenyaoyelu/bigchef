@@ -13,6 +13,8 @@ model Dish {
   description     String?
   sourceType      String           @default("manual")
   status          String           @default("published")
+  /// 菜谱维度点赞（应用内），与关联视频点赞合并为对外 likeCount
+  dishLikeCount   Int              @default(0)
   cookTimeMinutes Int?
   difficulty      Int?
   tasteTags       Json             @default("[]")
@@ -23,6 +25,7 @@ model Dish {
   videoRequest    VideoRequestDemand?
   favorites       UserFavorite[]
   viewHistories   UserHistory[]
+  dishLikes       UserDishLike[]
 }
 
 model Ingredient {
@@ -76,6 +79,17 @@ model UserHistory {
 
   @@index([userId, viewedAt])
   @@unique([userId, dishId])
+}
+
+model UserDishLike {
+  id        String   @id @default(cuid())
+  userId    String
+  dishId    String
+  createdAt DateTime @default(now())
+  dish      Dish     @relation(fields: [dishId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dishId])
+  @@index([userId, createdAt])
 }
 
 model AuthSmsCode {

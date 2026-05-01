@@ -4,6 +4,38 @@ import { AiGenerationError } from "../ai/ai-generation.error";
 import { RecipeGenerationService } from "../ai/recipe-generation.service";
 import { PrismaService } from "../database/prisma.service";
 
+/** 食材粗筛后最多拉取的菜谱数（内存内再算匹配与排序） */
+const MAX_DB_CANDIDATES = 400;
+/** 与 AI 合并时菜谱库最多条数（避免单次响应过大） */
+const MAX_DB_IN_MIXED_RESPONSE = 200;
+
+type DbDishRow = Prisma.DishGetPayload<{
+  include: {
+    ingredients: { include: { ingredient: true } };
+    videos: true;
+    _count: { select: { favorites: true } };
+  };
+}>;
+
+/** 推荐列表单项（下发客户端） */
+type RankedDbItem = {
+  dishId: string;
+  dishName: string;
+  missingIngredients: Array<{ name: string; role: "main" | "secondary" }>;
+  cookTimeMinutes: number;
+  difficulty: number;
+  videos: Array<{
+    videoId: string;
+    title: string;
+    url: string;
+    durationSec: number;
+    likeCount: number;
+  }>;
+  matchScore: number;
+  /** 菜谱 dishLikeCount + 关联视频点赞合计 */
+  likeCount: number;
+};
+
 @Injectable()
 export class RecommendService {
   private readonly logger = new Logger(RecommendService.name);
@@ -65,7 +97,6 @@ export class RecommendService {
 
   /**
    * 在 Ingredient 表上按用户食材做粗筛（精确或 name 包含），再反查关联菜谱。
-   * 避免无 where 的 take(20) 随机抽样导致永远抽不到含「猪肉」的 AI 菜。
    */
   private async ingredientIdsMatchingPantry(pantry: Set<string>): Promise<string[]> {
     if (!pantry.size) return [];
@@ -86,6 +117,94 @@ export class RecommendService {
     return [...new Set(rows.map((r) => r.id))];
   }
 
+  /**
+   * 按收藏数、菜谱点赞（含关联视频点赞）、食材匹配度排序。
+   */
+  private rankDbDishesForPantry(dishes: DbDishRow[], normalized: Set<string>): RankedDbItem[] {
+    const mapped = dishes.map((dish) => {
+      const ingredientsForMatch = this.ingredientNamesForMatch(dish.ingredients);
+      const missingIngredients = this.missingIngredientsForDish(dish.ingredients, normalized);
+      const hit = ingredientsForMatch.filter((item) => this.ingredientSatisfiedByPantry(normalized, item)).length;
+      const matchScore = ingredientsForMatch.length > 0 ? Number((hit / ingredientsForMatch.length).toFixed(2)) : 0;
+      const videoSum = dish.videos.reduce((s, v) => s + (v.likeCount ?? 0), 0);
+      const likeCount = (dish.dishLikeCount ?? 0) + videoSum;
+      return {
+        dishId: dish.id,
+        dishName: dish.name,
+        missingIngredients,
+        cookTimeMinutes: dish.cookTimeMinutes ?? 20,
+        difficulty: dish.difficulty ?? 2,
+        videos: dish.videos.map((video) => ({
+          videoId: video.id,
+          title: video.title,
+          url: video.url,
+          durationSec: video.durationSec ?? 0,
+          likeCount: video.likeCount ?? 0,
+        })),
+        matchScore,
+        favoriteCount: dish._count.favorites,
+        likeCount,
+        ingredientsForMatch,
+      };
+    });
+
+    return mapped
+      .filter((d) => d.ingredientsForMatch.length > 0 && d.matchScore > 0)
+      .sort((a, b) => {
+        const f = b.favoriteCount - a.favoriteCount;
+        if (f !== 0) return f;
+        const l = b.likeCount - a.likeCount;
+        if (l !== 0) return l;
+        const m = b.matchScore - a.matchScore;
+        if (m !== 0) return m;
+        return a.dishId.localeCompare(b.dishId);
+      })
+      .map(({ ingredientsForMatch: _omit, favoriteCount: _fc, ...rest }) => rest);
+  }
+
+  private mapGeneratedDishToItem(
+    dish: {
+      id: string;
+      name: string;
+      cookTimeMinutes: number | null;
+      difficulty: number | null;
+      ingredients: Array<{ role: string; ingredient: { name: string } }>;
+      videos: Array<{
+        id: string;
+        title: string;
+        url: string;
+        durationSec: number | null;
+        likeCount: number | null;
+      }>;
+      _count?: { favorites: number };
+      dishLikeCount?: number | null;
+    },
+    normalized: Set<string>,
+  ) {
+    const namesForMatch = this.ingredientNamesForMatch(dish.ingredients);
+    const missingIngredients = this.missingIngredientsForDish(dish.ingredients, normalized);
+    const hit = namesForMatch.filter((item) => this.ingredientSatisfiedByPantry(normalized, item)).length;
+    const matchScore = namesForMatch.length > 0 ? Number((hit / namesForMatch.length).toFixed(2)) : 0;
+    const videoSum = dish.videos.reduce((s, v) => s + (v.likeCount ?? 0), 0);
+    const likeCount = (dish.dishLikeCount ?? 0) + videoSum;
+    return {
+      dishId: dish.id,
+      dishName: dish.name,
+      missingIngredients,
+      cookTimeMinutes: dish.cookTimeMinutes ?? 20,
+      difficulty: dish.difficulty ?? 2,
+      videos: dish.videos.map((video) => ({
+        videoId: video.id,
+        title: video.title,
+        url: video.url,
+        durationSec: video.durationSec ?? 0,
+        likeCount: video.likeCount ?? 0,
+      })),
+      matchScore,
+      likeCount,
+    };
+  }
+
   async byIngredients(ingredients: string[], page = 1, pageSize = 10, aiBoost = false) {
     const normalized = new Set(
       ingredients
@@ -94,10 +213,14 @@ export class RecommendService {
         .map((item) => this.normalizePantryToken(item)),
     );
 
-    let dbResult: ReturnType<RecommendService["computeMatches"]>;
+    const safePage = Math.max(1, page);
+    const safePageSize = Math.min(50, Math.max(1, pageSize));
+    const actions = [{ actionType: "ai_boost_recommend", text: "AI 帮我再推荐" }];
+
+    let rankedDb: RankedDbItem[] = [];
     try {
       const candidateIngredientIds = await this.ingredientIdsMatchingPantry(normalized);
-      const dishes =
+      const dishes: DbDishRow[] =
         !normalized.size || !candidateIngredientIds.length
           ? []
           : await this.prisma.dish.findMany({
@@ -108,32 +231,11 @@ export class RecommendService {
               include: {
                 ingredients: { include: { ingredient: true } },
                 videos: true,
+                _count: { select: { favorites: true } },
               },
-              orderBy: { id: "desc" },
-              take: 120,
+              take: MAX_DB_CANDIDATES,
             });
-
-      const fromDb = dishes.map((dish) => {
-        const ingredientsForMatch = this.ingredientNamesForMatch(dish.ingredients);
-        const missingIngredients = this.missingIngredientsForDish(dish.ingredients, normalized);
-        return {
-          dishId: dish.id,
-          dishName: dish.name,
-          ingredientsForMatch,
-          missingIngredients,
-          cookTimeMinutes: dish.cookTimeMinutes ?? 20,
-          difficulty: dish.difficulty ?? 2,
-          videos: dish.videos.map((video) => ({
-            videoId: video.id,
-            title: video.title,
-            url: video.url,
-            durationSec: video.durationSec ?? 0,
-            likeCount: video.likeCount ?? 0,
-          })),
-        };
-      });
-
-      dbResult = this.computeMatches(fromDb, normalized, page, pageSize, aiBoost);
+      rankedDb = this.rankDbDishesForPantry(dishes, normalized);
     } catch (error) {
       this.logger.error(
         `Recommend DB failed. ingredients=${JSON.stringify(Array.from(normalized))}`,
@@ -142,77 +244,95 @@ export class RecommendService {
       throw new ServiceUnavailableException("数据库服务暂时不可用，请稍后重试。");
     }
 
-    if (dbResult.total > 0 && !aiBoost) {
+    const dbTotal = rankedDb.length;
+
+    if (dbTotal > 0 && !aiBoost) {
+      const start = (safePage - 1) * safePageSize;
+      const slice = rankedDb.slice(start, start + safePageSize);
+      const list = slice.map((item) => ({ ...item, entrySource: "db" as const }));
+      const hasMore = start + slice.length < dbTotal;
       return {
-        ...dbResult,
-        list: dbResult.list.map((item) => ({ ...item, entrySource: "db" as const })),
+        list,
+        total: dbTotal,
+        page: safePage,
+        pageSize: safePageSize,
+        hasMore,
+        source: "db" as const,
+        aiMeta: {
+          used: false,
+          triggeredBy: "none" as const,
+          generationSaved: false,
+        },
+        actions,
       };
     }
 
     try {
-      const aiFallback = await this.recipeGenerationService.generateRecommendWithPersistence({
-        ingredients: Array.from(normalized),
-        triggeredBy: dbResult.total > 0 && aiBoost ? "manual" : "db_miss",
-      });
-      if (!aiFallback.dishes.length) {
-        throw new ServiceUnavailableException("未能加载 AI 推荐结果，请稍后重试。");
-      }
+      if (dbTotal > 0 && aiBoost) {
+        const dbForMerge = rankedDb.slice(0, MAX_DB_IN_MIXED_RESPONSE);
+        const truncated = rankedDb.length > MAX_DB_IN_MIXED_RESPONSE;
 
-      const generated = aiFallback.dishes.map((dish) => {
-        const namesForMatch = this.ingredientNamesForMatch(dish.ingredients);
-        const missingIngredients = this.missingIngredientsForDish(dish.ingredients, normalized);
-        const hit = namesForMatch.filter((item) => this.ingredientSatisfiedByPantry(normalized, item)).length;
-        const score = namesForMatch.length > 0 ? Number((hit / namesForMatch.length).toFixed(2)) : 0;
-        return {
-          dishId: dish.id,
-          dishName: dish.name,
-          missingIngredients,
-          cookTimeMinutes: dish.cookTimeMinutes ?? 20,
-          difficulty: dish.difficulty ?? 2,
-          videos: dish.videos.map((video) => ({
-            videoId: video.id,
-            title: video.title,
-            url: video.url,
-            durationSec: video.durationSec ?? 0,
-            likeCount: video.likeCount ?? 0,
-          })),
-          matchScore: score,
+        const aiFallback = await this.recipeGenerationService.generateRecommendWithPersistence({
+          ingredients: Array.from(normalized),
+          triggeredBy: "manual",
+        });
+        if (!aiFallback.dishes.length) {
+          throw new ServiceUnavailableException("未能加载 AI 推荐结果，请稍后重试。");
+        }
+
+        const dbList = dbForMerge.map((item) => ({ ...item, entrySource: "db" as const }));
+        const generated = aiFallback.dishes.map((dish) => ({
+          ...this.mapGeneratedDishToItem(dish, normalized),
           entrySource: "ai" as const,
-        };
-      });
+        }));
 
-      if (dbResult.total > 0 && aiBoost) {
-        const dbList = dbResult.list.map((item) => ({ ...item, entrySource: "db" as const }));
         const seen = new Set(dbList.map((d) => d.dishId));
         const aiExtra = generated.filter((a) => !seen.has(a.dishId));
         const merged = [...dbList, ...aiExtra];
+
         return {
           list: merged,
           total: merged.length,
           page: 1,
           pageSize: merged.length,
+          hasMore: false,
           source: "mixed" as const,
           aiMeta: {
             used: true,
             triggeredBy: "manual_ai_boost",
             generationSaved: aiFallback.generationSaved,
+            dbListTruncated: truncated,
           },
-          actions: [{ actionType: "ai_boost_recommend", text: "AI 帮我再推荐" }],
+          actions,
         };
       }
+
+      const aiFallback = await this.recipeGenerationService.generateRecommendWithPersistence({
+        ingredients: Array.from(normalized),
+        triggeredBy: "db_miss",
+      });
+      if (!aiFallback.dishes.length) {
+        throw new ServiceUnavailableException("未能加载 AI 推荐结果，请稍后重试。");
+      }
+
+      const generated = aiFallback.dishes.map((dish) => ({
+        ...this.mapGeneratedDishToItem(dish, normalized),
+        entrySource: "ai" as const,
+      }));
 
       return {
         list: generated,
         total: generated.length,
         page: 1,
         pageSize: generated.length,
-        source: "ai_generated",
+        hasMore: false,
+        source: "ai_generated" as const,
         aiMeta: {
           used: true,
           triggeredBy: "db_miss",
           generationSaved: aiFallback.generationSaved,
         },
-        actions: [{ actionType: "ai_boost_recommend", text: "AI 帮我再推荐" }],
+        actions,
       };
     } catch (error) {
       if (error instanceof HttpException) {
@@ -227,56 +347,5 @@ export class RecommendService {
       );
       throw new ServiceUnavailableException("AI 推荐暂时不可用，请稍后重试。");
     }
-  }
-
-  private computeMatches(
-    dishes: Array<{
-      dishId: string;
-      dishName: string;
-      ingredientsForMatch: string[];
-      missingIngredients: Array<{ name: string; role: "main" | "secondary" }>;
-      cookTimeMinutes: number;
-      difficulty: number;
-      videos: Array<{
-        videoId: string;
-        title: string;
-        url: string;
-        durationSec: number;
-        likeCount: number;
-      }>;
-    }>,
-    normalized: Set<string>,
-    page: number,
-    pageSize: number,
-    aiBoost: boolean,
-  ) {
-    const matched = dishes
-      .filter((dish) => dish.ingredientsForMatch.length > 0)
-      .map((dish) => {
-        const hit = dish.ingredientsForMatch.filter((item) => this.ingredientSatisfiedByPantry(normalized, item)).length;
-        const matchScore = Number((hit / dish.ingredientsForMatch.length).toFixed(2));
-        return { ...dish, matchScore };
-      })
-      .filter((dish) => dish.matchScore > 0)
-      .sort((a, b) => b.matchScore - a.matchScore)
-      .map(({ ingredientsForMatch, ...rest }) => rest);
-
-    const safePage = Math.max(1, page);
-    const safePageSize = Math.max(1, pageSize);
-    const start = (safePage - 1) * safePageSize;
-    const list = matched.slice(start, start + safePageSize);
-    return {
-      list,
-      total: matched.length,
-      page: safePage,
-      pageSize: safePageSize,
-      source: "db",
-      aiMeta: {
-        used: false,
-        triggeredBy: aiBoost ? "manual_ai_boost_pending" : "none",
-        generationSaved: false,
-      },
-      actions: [{ actionType: "ai_boost_recommend", text: "AI 帮我再推荐" }],
-    };
   }
 }
