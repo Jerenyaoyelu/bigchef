@@ -40,3 +40,6 @@ __pycache__/
 prisma/*.db
 prisma/*.db-journal
 
+# Local media uploads (V2 community video)
+backend-nest/uploads/
+

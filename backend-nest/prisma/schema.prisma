@@ -168,3 +168,258 @@ model AiGenerationResult {
 
   @@unique([taskId, dishId])
 }
+
+// --- BigChef V2: 社区、家庭、临时聚餐 ---
+
+model CommunityMediaAsset {
+  id                 String          @id @default(cuid())
+  ownerId            String
+  originFileName     String?
+  originMime         String?
+  originSize         Int?
+  storageKeyRaw      String?
+  storageKeyPlayback String?
+  coverKey           String?
+  transcodeStatus    String          @default("pending")
+  errorCode          String?
+  durationSec        Int?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  post               CommunityPost?
+}
+
+model CommunityPost {
+  id               String                 @id @default(cuid())
+  authorId         String
+  title            String?
+  content          String?
+  dishId           String?
+  tags             Json                   @default("[]")
+  assetId          String?                @unique
+  videoUrl         String?
+  coverUrl         String?
+  videoStatus      String?
+  durationSec      Int?
+  status           String                 @default("published")
+  likeCount        Int                    @default(0)
+  commentCount     Int                    @default(0)
+  favoriteCount    Int                    @default(0)
+  completePlayRate Float                  @default(0)
+  playSamples      Int                    @default(0)
+  moderationStatus String                 @default("ok")
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  asset            CommunityMediaAsset?   @relation(fields: [assetId], references: [id])
+  comments         CommunityComment[]
+  likes            CommunityPostLike[]
+  favorites        CommunityPostFavorite[]
+  reports          CommunityPostReport[]
+
+  @@index([authorId, createdAt])
+  @@index([status, createdAt])
+}
+
+model CommunityPostReport {
+  id         String        @id @default(cuid())
+  postId     String
+  reporterId String
+  reason     String
+  createdAt  DateTime      @default(now())
+  post       CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, reporterId])
+  @@index([postId, createdAt])
+}
+
+model CommunityComment {
+  id        String        @id @default(cuid())
+  postId    String
+  authorId  String
+  content   String
+  createdAt DateTime      @default(now())
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+}
+
+model CommunityPostLike {
+  id        String        @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime      @default(now())
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId, createdAt])
+}
+
+model CommunityPostFavorite {
+  id        String        @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime      @default(now())
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId, createdAt])
+}
+
+model Family {
+  id                  String             @id @default(cuid())
+  name                String
+  ownerId             String
+  inviteCode          String             @unique
+  householdRelation   String
+  collaborationMode   String             @default("couple_flexible")
+  hostOnlyEdit        Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  members             FamilyMember[]
+  menuWeeks           FamilyMenuWeek[]
+  wishes              FamilyDishWish[]
+  shoppingLists       FamilyShoppingList[]
+  checkins            FamilyCheckin[]
+}
+
+model FamilyCheckin {
+  id         String   @id @default(cuid())
+  familyId   String
+  userId     String
+  dishId     String?
+  menuWeekId String?
+  content    String?
+  mediaUrl   String?
+  createdAt  DateTime @default(now())
+  family     Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model FamilyMember {
+  id        String   @id @default(cuid())
+  familyId  String
+  userId    String
+  role      String   @default("member")
+  createdAt DateTime @default(now())
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, userId])
+  @@index([userId])
+}
+
+model FamilyMenuWeek {
+  id              String               @id @default(cuid())
+  familyId        String
+  weekStart       DateTime
+  status          String               @default("active")
+  lastGeneratedAt DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  family          Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  mealPlans       FamilyMealPlan[]
+  shoppingLists   FamilyShoppingList[]
+
+  @@unique([familyId, weekStart])
+}
+
+model FamilyMealPlan {
+  id               String         @id @default(cuid())
+  familyId         String
+  menuWeekId       String
+  dishId           String
+  date             DateTime
+  assigneeUserId   String?
+  status           String         @default("planned")
+  createdAt        DateTime       @default(now())
+  menuWeek         FamilyMenuWeek @relation(fields: [menuWeekId], references: [id], onDelete: Cascade)
+
+  @@index([menuWeekId])
+  @@index([familyId, date])
+}
+
+model FamilyDishWish {
+  id        String   @id @default(cuid())
+  familyId  String
+  userId    String
+  dishId    String
+  note      String?
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, status])
+}
+
+model FamilyShoppingList {
+  id         String                   @id @default(cuid())
+  familyId   String
+  menuWeekId String?
+  mode       String                   @default("single")
+  createdAt  DateTime                 @default(now())
+  updatedAt  DateTime                 @updatedAt
+  family     Family                   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  menuWeek   FamilyMenuWeek?          @relation(fields: [menuWeekId], references: [id], onDelete: SetNull)
+  items      FamilyShoppingListItem[]
+}
+
+model FamilyShoppingListItem {
+  id                    String             @id @default(cuid())
+  listId                String
+  ingredientKey         String
+  displayName           String
+  quantity              String?
+  unit                  String?
+  category              String?
+  batchIndex            Int?
+  suggestedPurchaseDate DateTime?
+  excludedReason        String?
+  purchasedAt           DateTime?
+  purchasedByUserId     String?
+  sortOrder             Int                @default(0)
+  list                  FamilyShoppingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@index([listId, sortOrder])
+}
+
+model Gathering {
+  id                         String             @id @default(cuid())
+  creatorId                  String
+  title                      String?
+  headcount                  Int
+  status                     String             @default("collecting")
+  shareToken                 String             @unique
+  expiresAt                  DateTime?
+  menuItems                  Json?
+  shoppingList               Json?
+  beveragePresets            Json               @default("[]")
+  beverageNote               String?
+  includeBeverageInShopping  Boolean            @default(false)
+  createdAt                  DateTime           @default(now())
+  updatedAt                  DateTime           @updatedAt
+  members                    GatheringMember[]
+  wishes                     GatheringWish[]
+}
+
+model GatheringMember {
+  id          String    @id @default(cuid())
+  gatheringId String
+  userId      String
+  joinedAt    DateTime  @default(now())
+  gathering   Gathering @relation(fields: [gatheringId], references: [id], onDelete: Cascade)
+
+  @@unique([gatheringId, userId])
+  @@index([userId])
+}
+
+model GatheringWish {
+  id          String    @id @default(cuid())
+  gatheringId String
+  userId      String
+  dishId      String?
+  freeText    String?
+  createdAt   DateTime  @default(now())
+  gathering   Gathering @relation(fields: [gatheringId], references: [id], onDelete: Cascade)
+
+  @@index([gatheringId, createdAt])
+}
