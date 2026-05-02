@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useFamilySpaceStore } from "../../../store/familySpaceStore";
 import { useSessionStore } from "../../../store/sessionStore";
 import { useUserFoodStore } from "../../../store/userFoodStore";
 
@@ -25,6 +26,8 @@ type ProfileSectionProps = {
   onOpenDishDetail: (dishId: string) => void;
   onToggleFavorite: (dish: FavoriteDish) => Promise<void>;
   onClearRecentViews: () => Promise<void>;
+  onOpenFamilySpace: () => void;
+  onOpenGathering: () => void;
 };
 
 export function ProfileSection({
@@ -35,9 +38,16 @@ export function ProfileSection({
   onOpenDishDetail,
   onToggleFavorite,
   onClearRecentViews,
+  onOpenFamilySpace,
+  onOpenGathering,
 }: ProfileSectionProps) {
   const setAuthUserId = useSessionStore((s) => s.setAuthUserId);
   const hydrateFromServer = useUserFoodStore((s) => s.hydrateFromServer);
+  const familyJoined = useFamilySpaceStore((s) => s.joined);
+  const familySpaceTitle = useFamilySpaceStore((s) => s.spaceTitle);
+  const familyMemberCount = useFamilySpaceStore((s) => s.memberCount);
+  const familyPlannedDays = useFamilySpaceStore((s) => s.plannedDaysThisWeek);
+  const familyRelation = useFamilySpaceStore((s) => s.relation);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [profileFlow, setProfileFlow] = useState<ProfileFlow>("overview");
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -165,6 +175,59 @@ export function ProfileSection({
               </Pressable>
             </View>
           )}
+
+          <View style={styles.entryRows}>
+            {familyJoined ? (
+              <Pressable style={styles.familyJoinedCard} onPress={onOpenFamilySpace}>
+                <View style={styles.familyJoinedTop}>
+                  <View style={styles.entryLeft}>
+                    <View
+                      style={[
+                        styles.entryIconWrap,
+                        familyRelation === "roommates" ? styles.entryIconGathering : styles.entryIconFamily,
+                      ]}
+                    >
+                      <Text style={styles.entryIconEmoji}>{familyRelation === "roommates" ? "🏠" : "❤️"}</Text>
+                    </View>
+                    <View style={styles.entryTexts}>
+                      <Text style={styles.entryTitle}>{familySpaceTitle}</Text>
+                      <Text style={styles.entryMemberLine}>{familyMemberCount}位成员</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.entryChevron}>›</Text>
+                </View>
+                <View style={styles.familyJoinedFooter}>
+                  <Text style={styles.footerCalIcon}>📅</Text>
+                  <Text style={styles.footerPlanText}>本周已规划 {familyPlannedDays}/7 天</Text>
+                </View>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.entryCard} onPress={onOpenFamilySpace}>
+                <View style={styles.entryLeft}>
+                  <View style={[styles.entryIconWrap, styles.entryIconFamily]}>
+                    <Text style={styles.entryIconEmoji}>❤️</Text>
+                  </View>
+                  <View style={styles.entryTexts}>
+                    <Text style={styles.entryTitle}>家庭空间</Text>
+                    <Text style={styles.entrySubtitle}>一起规划菜单，共享采购清单</Text>
+                  </View>
+                </View>
+                <Text style={styles.entryChevron}>›</Text>
+              </Pressable>
+            )}
+            <Pressable style={styles.entryCard} onPress={onOpenGathering}>
+              <View style={styles.entryLeft}>
+                <View style={[styles.entryIconWrap, styles.entryIconGathering]}>
+                  <Text style={styles.entryIconEmoji}>👥</Text>
+                </View>
+                <View style={styles.entryTexts}>
+                  <Text style={styles.entryTitle}>临时聚餐</Text>
+                  <Text style={styles.entrySubtitle}>多人报菜，AI生成聚餐菜单</Text>
+                </View>
+              </View>
+              <Text style={styles.entryChevron}>›</Text>
+            </Pressable>
+          </View>
 
           <View style={styles.statsRow}>
             <View style={[styles.statsCard, styles.statsCardFavorite]}>
@@ -478,6 +541,74 @@ const styles = StyleSheet.create({
   profileHeader: { gap: 5, marginBottom: 2 },
   profileTitle: { fontSize: 24, color: "#1a1a1a", fontWeight: "600" },
   profileSubtitle: { fontSize: 16, color: "#757575" },
+  entryRows: { gap: 12 },
+  familyJoinedCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  familyJoinedTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  entryMemberLine: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#757575",
+  },
+  familyJoinedFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  footerCalIcon: { fontSize: 14 },
+  footerPlanText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#757575",
+  },
+  entryCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    minHeight: 82,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  entryLeft: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
+  entryIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  entryIconFamily: { backgroundColor: "#ffe2e2" },
+  entryIconGathering: { backgroundColor: "#ffedd4" },
+  entryIconEmoji: { fontSize: 22 },
+  entryTexts: { flex: 1, gap: 4 },
+  entryTitle: { fontSize: 16, fontWeight: "600", color: "#1a1a1a" },
+  entrySubtitle: { fontSize: 14, color: "#757575" },
+  entryChevron: { fontSize: 22, color: "#c4c4c4", fontWeight: "300" },
   statsRow: { flexDirection: "row", gap: 10 },
   statsCard: {
     flex: 1,

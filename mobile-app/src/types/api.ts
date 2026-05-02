@@ -106,3 +106,22 @@ export type PopularDishesResponse = {
   total: number;
 };
 
+/** 社区 Feed tab：对应后端 `GET /api/v2/community/posts?tab=` */
+export type CommunityFeedTab = "latest" | "hot";
+
+export type CommunityPost = {
+  id: string;
+  authorId: string;
+  title: string | null;
+  coverUrl: string | null;
+  videoUrl: string | null;
+  durationSec: number | null;
+  likeCount: number;
+  commentCount: number;
+  createdAt: string;
+};
+
+export type CommunityListResponse = {
+  items: CommunityPost[];
+  nextCursor: string | null;
+};
