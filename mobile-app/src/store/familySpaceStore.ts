@@ -2,9 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import { getFamily } from "../features/family/api/familyApi";
+
 export type HouseholdRelation = "couple" | "roommates";
 
 type SetJoinedPayload = {
+  familyId?: string;
   spaceTitle: string;
   memberCount?: number;
   plannedDaysThisWeek?: number;
@@ -14,24 +17,24 @@ type SetJoinedPayload = {
 
 type FamilySpaceState = {
   joined: boolean;
-  /** 列表主标题，如「情侣空间」「合租空间」 */
+  familyId: string | null;
   spaceTitle: string;
   memberCount: number;
-  /** 本周已安排菜单的天数 0–7（与周菜单联动） */
   plannedDaysThisWeek: number;
-  /** 详情页「本周菜单」统计：已添加的菜品数 */
   weeklyDishCount: number;
   familyDisplayName: string;
   relation: HouseholdRelation | null;
   setJoined: (p: SetJoinedPayload) => void;
   setPlanStats: (p: { plannedDaysThisWeek: number; weeklyDishCount: number }) => void;
+  hydrateFromServer: () => Promise<void>;
   clear: () => void;
 };
 
 export const useFamilySpaceStore = create<FamilySpaceState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       joined: false,
+      familyId: null,
       spaceTitle: "情侣空间",
       memberCount: 1,
       plannedDaysThisWeek: 0,
@@ -41,6 +44,7 @@ export const useFamilySpaceStore = create<FamilySpaceState>()(
       setJoined: (p) =>
         set({
           joined: true,
+          familyId: p.familyId ?? null,
           spaceTitle: p.spaceTitle,
           memberCount: p.memberCount ?? 1,
           plannedDaysThisWeek: p.plannedDaysThisWeek ?? 0,
@@ -53,9 +57,26 @@ export const useFamilySpaceStore = create<FamilySpaceState>()(
           plannedDaysThisWeek: p.plannedDaysThisWeek,
           weeklyDishCount: p.weeklyDishCount,
         }),
+      hydrateFromServer: async () => {
+        const { familyId, joined } = get();
+        if (!joined || !familyId) return;
+        try {
+          const detail = await getFamily(familyId);
+          const isCouple = detail.householdRelation === "couple";
+          set({
+            memberCount: detail.members.length,
+            spaceTitle: isCouple ? "情侣空间" : "合租空间",
+            familyDisplayName: detail.name,
+            relation: detail.householdRelation as HouseholdRelation,
+          });
+        } catch {
+          /* 保持本地缓存 */
+        }
+      },
       clear: () =>
         set({
           joined: false,
+          familyId: null,
           spaceTitle: "情侣空间",
           memberCount: 1,
           plannedDaysThisWeek: 0,
@@ -69,6 +90,7 @@ export const useFamilySpaceStore = create<FamilySpaceState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({
         joined: s.joined,
+        familyId: s.familyId,
         spaceTitle: s.spaceTitle,
         memberCount: s.memberCount,
         plannedDaysThisWeek: s.plannedDaysThisWeek,

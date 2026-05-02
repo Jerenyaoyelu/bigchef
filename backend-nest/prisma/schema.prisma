@@ -328,6 +328,12 @@ model FamilyMealPlan {
   familyId         String
   menuWeekId       String
   dishId           String
+  /// 前端自由文本菜名（当 dishId 为占位或自定义时使用）
+  dishName         String?
+  /// 对应星期几的标识（如 "mon","tue"…）
+  weekday          String?
+  /// 对应餐次标识（如 "breakfast","lunch","dinner"）
+  mealKind         String?
   date             DateTime
   assigneeUserId   String?
   status           String         @default("planned")
@@ -345,6 +351,10 @@ model FamilyDishWish {
   dishId    String
   note      String?
   status    String   @default("active")
+  /// 心愿关联到周菜单的星期（如 "mon"）
+  linkedDay String?
+  /// 心愿关联到周菜单的餐次（如 "lunch"）
+  linkedMeal String?
   createdAt DateTime @default(now())
   family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
 

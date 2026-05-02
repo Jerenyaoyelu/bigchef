@@ -152,7 +152,7 @@ export class FamilyService {
   async addMealPlan(
     familyId: string,
     userId: string,
-    payload: { menuWeekId: string; dishId: string; date: string; assigneeUserId?: string },
+    payload: { menuWeekId: string; dishId: string; date: string; assigneeUserId?: string; dishName?: string; weekday?: string; mealKind?: string },
   ) {
     const member = await this.assertFamilyMember(familyId, userId);
     const week = await this.prisma.familyMenuWeek.findFirst({ where: { id: payload.menuWeekId, familyId } });
@@ -166,6 +166,9 @@ export class FamilyService {
         familyId,
         menuWeekId: payload.menuWeekId,
         dishId: payload.dishId,
+        dishName: payload.dishName ?? null,
+        weekday: payload.weekday ?? null,
+        mealKind: payload.mealKind ?? null,
         date: new Date(payload.date),
         assigneeUserId: payload.assigneeUserId ?? null,
         status: "planned",
@@ -177,7 +180,7 @@ export class FamilyService {
     familyId: string,
     planId: string,
     userId: string,
-    payload: Partial<{ status: "planned" | "done"; assigneeUserId: string | null; date: string; dishId: string }>,
+    payload: Partial<{ status: "planned" | "done"; assigneeUserId: string | null; date: string; dishId: string; dishName: string; weekday: string; mealKind: string }>,
   ) {
     await this.assertFamilyMember(familyId, userId);
     const plan = await this.prisma.familyMealPlan.findFirst({ where: { id: planId, familyId } });
@@ -189,6 +192,9 @@ export class FamilyService {
         ...(payload.assigneeUserId !== undefined ? { assigneeUserId: payload.assigneeUserId } : {}),
         ...(payload.date != null ? { date: new Date(payload.date) } : {}),
         ...(payload.dishId != null ? { dishId: payload.dishId } : {}),
+        ...(payload.dishName !== undefined ? { dishName: payload.dishName } : {}),
+        ...(payload.weekday !== undefined ? { weekday: payload.weekday } : {}),
+        ...(payload.mealKind !== undefined ? { mealKind: payload.mealKind } : {}),
       },
     });
   }
@@ -198,10 +204,17 @@ export class FamilyService {
     return this.prisma.familyDishWish.findMany({ where: { familyId, status: "active" }, orderBy: { createdAt: "desc" } });
   }
 
-  async addWish(familyId: string, userId: string, payload: { dishId: string; note?: string }) {
+  async addWish(familyId: string, userId: string, payload: { dishId: string; note?: string; linkedDay?: string; linkedMeal?: string }) {
     await this.assertFamilyMember(familyId, userId);
     return this.prisma.familyDishWish.create({
-      data: { familyId, userId, dishId: payload.dishId, note: payload.note ?? null },
+      data: {
+        familyId,
+        userId,
+        dishId: payload.dishId,
+        note: payload.note ?? null,
+        linkedDay: payload.linkedDay ?? null,
+        linkedMeal: payload.linkedMeal ?? null,
+      },
     });
   }
 

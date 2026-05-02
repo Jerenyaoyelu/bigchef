@@ -47,6 +47,18 @@ class CreateMealPlanDto {
   @IsOptional()
   @IsString()
   assigneeUserId?: string;
+
+  @IsOptional()
+  @IsString()
+  dishName?: string;
+
+  @IsOptional()
+  @IsString()
+  weekday?: string;
+
+  @IsOptional()
+  @IsString()
+  mealKind?: string;
 }
 
 class PatchMealPlanDto {
@@ -65,6 +77,18 @@ class PatchMealPlanDto {
   @IsOptional()
   @IsString()
   dishId?: string;
+
+  @IsOptional()
+  @IsString()
+  dishName?: string;
+
+  @IsOptional()
+  @IsString()
+  weekday?: string;
+
+  @IsOptional()
+  @IsString()
+  mealKind?: string;
 }
 
 class AddWishDto {
@@ -74,6 +98,14 @@ class AddWishDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  linkedDay?: string;
+
+  @IsOptional()
+  @IsString()
+  linkedMeal?: string;
 }
 
 class PatchShoppingListDto {

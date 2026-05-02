@@ -85,11 +85,11 @@ function CreateGatheringStep({
 
   const canSubmit = title.trim().length > 0;
 
-  function submit() {
+  async function submit() {
     if (!canSubmit) return;
     const headcount = resolvedHeadcount();
     track("gathering_create_submit", { titleLen: title.trim().length, headcount });
-    beginGathering(title.trim(), headcount);
+    await beginGathering(title.trim(), headcount);
     onCreated();
   }
 
@@ -295,10 +295,10 @@ function GatheringRoomStep({
   const [drinkQty, setDrinkQty] = useState("");
   const [miniToast, setMiniToast] = useState<string | null>(null);
 
-  function submitWish() {
+  async function submitWish() {
     const d = dish.trim();
     if (!d) return;
-    addWish(nickname, d);
+    await addWish(nickname, d);
     track("gathering_wish_add", { hasNickname: nickname.trim().length > 0 });
     setDish("");
     setMiniToast("已记录一道菜");
