@@ -3,6 +3,7 @@ import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View 
 import { useFamilySpaceStore } from "../../../store/familySpaceStore";
 import { useSessionStore } from "../../../store/sessionStore";
 import { useUserFoodStore } from "../../../store/userFoodStore";
+import { sendSms, smsLogin, upgradeGuest } from "../../auth/api/authApi";
 
 type FavoriteDish = {
   dishId: string;
@@ -28,6 +29,10 @@ type ProfileSectionProps = {
   onClearRecentViews: () => Promise<void>;
   onOpenFamilySpace: () => void;
   onOpenGathering: () => void;
+  /** 外部请求强制跳转到登录页 */
+  forceLogin?: boolean;
+  /** 登录流程完成后通知外部清除 forceLogin */
+  onLoginHandled?: () => void;
 };
 
 export function ProfileSection({
@@ -40,6 +45,8 @@ export function ProfileSection({
   onClearRecentViews,
   onOpenFamilySpace,
   onOpenGathering,
+  forceLogin,
+  onLoginHandled,
 }: ProfileSectionProps) {
   const setAuthUserId = useSessionStore((s) => s.setAuthUserId);
   const hydrateFromServer = useUserFoodStore((s) => s.hydrateFromServer);
@@ -72,6 +79,22 @@ export function ProfileSection({
   }, [sendCooldown]);
 
   useEffect(() => {
+    const { accessToken } = useSessionStore.getState();
+    if (accessToken) {
+      setIsLoggedIn(true);
+    }
+  }, []);
+
+  /** 外部请求强制登录时，直接跳转到手机号登录页 */
+  useEffect(() => {
+    if (forceLogin && !isLoggedIn) {
+      setProfileFlow("phoneLogin");
+      setLoginFormError("");
+      onLoginHandled?.();
+    }
+  }, [forceLogin, isLoggedIn, onLoginHandled]);
+
+  useEffect(() => {
     if (profileFlow !== "migrating") return;
     const timer = setTimeout(() => {
       setProfileFlow("migrationResult");
@@ -97,31 +120,42 @@ export function ProfileSection({
     setLoginFormError("");
   }
 
-  function onSendCode() {
+  async function onSendCode() {
     if (sendCodeDisabled) return;
     setSendCooldown(60);
     setLoginFormError("");
+    try {
+      await sendSms(phone);
+    } catch {
+      setLoginFormError("发送失败，请稍后重试");
+    }
   }
 
-  function onSubmitPhoneLogin() {
+  async function onSubmitPhoneLogin() {
     if (!/^1\d{10}$/.test(phone)) {
       setLoginFormError("请输入正确的11位手机号");
       return;
     }
-    if (code !== "123456") {
-      setLoginFormError("验证码错误，请输入测试验证码 123456");
-      return;
+    try {
+      const result = await smsLogin(phone, code);
+      useSessionStore.getState().setAuthUserId(result.user.userId);
+      useSessionStore.getState().setTokens(result.accessToken, result.refreshToken);
+      void hydrateFromServer();
+      setIsLoggedIn(true);
+      setShowLoginToast(true);
+      setProfileFlow("migrating");
+      // 尝试迁移游客数据
+      const guestId = useSessionStore.getState().guestId;
+      if (guestId) {
+        try { await upgradeGuest(guestId); } catch { /* ignore */ }
+      }
+    } catch {
+      setLoginFormError("验证码错误或已过期");
     }
-    setLoginFormError("");
-    setAuthUserId(`user_${phone}`);
-    void hydrateFromServer();
-    setIsLoggedIn(true);
-    setShowLoginToast(true);
-    setProfileFlow("migrating");
   }
 
   function onLogout() {
-    setAuthUserId(null);
+    useSessionStore.getState().logout();
     void hydrateFromServer();
     setIsLoggedIn(false);
     setPhone("");

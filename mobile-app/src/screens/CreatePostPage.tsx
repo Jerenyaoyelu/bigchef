@@ -1,6 +1,7 @@
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -14,15 +15,36 @@ import {
 } from "react-native";
 import { track } from "../analytics/tracker";
 import { fetchDishByName } from "../features/dish/api/dishApi";
+import {
+  createCommunityPost,
+  mediaUploadInit,
+  mediaUploadBlob,
+  mediaUploadComplete,
+} from "../features/community/api/communityApi";
 
 const TAG_PRESETS = ["家常菜", "快手菜", "新手友好", "下饭菜"];
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 
 type CreatePostPageProps = {
   onBack: () => void;
+  onPublished?: () => void;
 };
 
-export function CreatePostPage({ onBack }: CreatePostPageProps) {
+type UploadPhase = "idle" | "uploading" | "processing" | "done" | "error";
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+export function CreatePostPage({ onBack, onPublished }: CreatePostPageProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [dishQuery, setDishQuery] = useState("");
@@ -31,7 +53,10 @@ export function CreatePostPage({ onBack }: CreatePostPageProps) {
   const [videoAsset, setVideoAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [dishSearchBusy, setDishSearchBusy] = useState(false);
 
-  const canPublish = title.trim().length > 0 && videoAsset != null;
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadProgress, setUploadProgress] = useState("");
+
+  const canPublish = title.trim().length > 0 && videoAsset != null && uploadPhase === "idle";
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
@@ -81,8 +106,8 @@ export function CreatePostPage({ onBack }: CreatePostPageProps) {
     setLinkedDish(null);
   }
 
-  function onSubmit() {
-    if (!canPublish) return;
+  async function onSubmit() {
+    if (!canPublish || !videoAsset) return;
     track("create_post_submit", {
       hasVideo: true,
       titleLen: title.trim().length,
@@ -90,11 +115,58 @@ export function CreatePostPage({ onBack }: CreatePostPageProps) {
       tagCount: selectedTags.length,
       hasLinkedDish: !!linkedDish,
     });
-    Alert.alert(
-      "提示",
-      "视频上传与正式发布需登录账号并完成服务端处理，该能力将在后续版本接入。可先保存草稿信息。",
-      [{ text: "知道了" }],
-    );
+
+    try {
+      // Step 1: upload init
+      setUploadPhase("uploading");
+      setUploadProgress("正在初始化上传...");
+      const mimeType = videoAsset.mimeType ?? "video/mp4";
+      const fileName = videoAsset.fileName ?? `video_${Date.now()}.mp4`;
+      const initResult = await mediaUploadInit({ fileName, mimeType });
+
+      // Step 2: upload blob
+      setUploadProgress("正在上传视频...");
+      const fileUri = videoAsset.uri;
+      await mediaUploadBlob(initResult.assetId, fileUri, fileName, mimeType);
+
+      // Step 3: upload complete (triggers transcode)
+      setUploadProgress("上传完成，正在处理视频...");
+      setUploadPhase("processing");
+      await mediaUploadComplete(initResult.assetId);
+
+      // Step 4: create post
+      setUploadProgress("正在发布...");
+      await createCommunityPost({
+        title: title.trim(),
+        content: body.trim() || undefined,
+        dishId: linkedDish?.dishId,
+        tags: selectedTags.length > 0 ? selectedTags : undefined,
+        assetId: initResult.assetId,
+        status: "published",
+      });
+
+      setUploadPhase("done");
+      setUploadProgress("发布成功！");
+      track("create_post_success", { assetId: initResult.assetId });
+      Alert.alert("发布成功", "视频正在后台处理，预计1-3分钟后可在社区看到。", [
+        { text: "好的", onPress: () => onPublished?.() ?? onBack() },
+      ]);
+    } catch (e) {
+      setUploadPhase("error");
+      setUploadProgress("");
+      const msg = (e as Error).message || "发布失败";
+      track("create_post_failed", { message: msg });
+      Alert.alert("发布失败", msg, [
+        { text: "重试", onPress: () => { setUploadPhase("idle"); onSubmit(); } },
+        { text: "取消", style: "cancel", onPress: () => setUploadPhase("idle") },
+      ]);
+    }
+  }
+
+  function removeVideo() {
+    setVideoAsset(null);
+    setUploadPhase("idle");
+    setUploadProgress("");
   }
 
   return (
@@ -102,7 +174,6 @@ export function CreatePostPage({ onBack }: CreatePostPageProps) {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
         <View style={styles.header}>
           <Pressable style={styles.headerIconBtn} onPress={onBack} hitSlop={8}>
@@ -122,11 +193,41 @@ export function CreatePostPage({ onBack }: CreatePostPageProps) {
         >
           <View style={styles.fieldBlock}>
             <Text style={styles.label}>视频</Text>
-            <Pressable style={styles.videoDrop} onPress={pickVideo}>
-              <Text style={styles.videoIcon}>🎬</Text>
-              <Text style={styles.videoPrimary}>{videoAsset ? "已选择视频，点击重新选择" : "从相册选择视频"}</Text>
-              <Text style={styles.videoHint}>支持120s内，200MB以下</Text>
-            </Pressable>
+            {videoAsset ? (
+              <View style={styles.videoPreviewCard}>
+                <View style={styles.videoThumb}>
+                  <Text style={styles.videoThumbIcon}>🎬</Text>
+                </View>
+                <View style={styles.videoInfo}>
+                  <Text style={styles.videoFileName} numberOfLines={1}>
+                    {videoAsset.fileName ?? "已选视频"}
+                  </Text>
+                  <View style={styles.videoMetaRow}>
+                    {videoAsset.fileSize != null && (
+                      <Text style={styles.videoMetaText}>{formatFileSize(videoAsset.fileSize)}</Text>
+                    )}
+                    {videoAsset.duration != null && (
+                      <Text style={styles.videoMetaText}>{formatDuration(videoAsset.duration / 1000)}</Text>
+                    )}
+                  </View>
+                  <Text style={styles.videoReadyLabel}>已就绪</Text>
+                </View>
+                <Pressable style={styles.videoRemoveBtn} onPress={removeVideo} hitSlop={8}>
+                  <Text style={styles.videoRemoveIcon}>✕</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable style={styles.videoDrop} onPress={pickVideo}>
+                <Text style={styles.videoIcon}>🎬</Text>
+                <Text style={styles.videoPrimary}>从相册选择视频</Text>
+                <Text style={styles.videoHint}>支持120s内，200MB以下</Text>
+              </Pressable>
+            )}
+            {videoAsset && (
+              <Pressable style={styles.repickBtn} onPress={pickVideo}>
+                <Text style={styles.repickText}>重新选择</Text>
+              </Pressable>
+            )}
           </View>
 
           <View style={styles.fieldBlock}>
@@ -199,13 +300,32 @@ export function CreatePostPage({ onBack }: CreatePostPageProps) {
             </ScrollView>
           </View>
 
+          {uploadPhase !== "idle" && (
+            <View style={styles.uploadStatusCard}>
+              {uploadPhase === "error" ? (
+                <Text style={styles.uploadErrorText}>上传失败，请重试</Text>
+              ) : (
+                <View style={styles.uploadingRow}>
+                  <ActivityIndicator size="small" color="#ff6b35" />
+                  <Text style={styles.uploadingText}>{uploadProgress}</Text>
+                </View>
+              )}
+            </View>
+          )}
+
           <Pressable
             style={[styles.publishBtn, !canPublish && styles.publishBtnDisabled]}
             onPress={onSubmit}
             disabled={!canPublish}
           >
-            <Text style={styles.publishPlane}>✈</Text>
-            <Text style={styles.publishLabel}>发布</Text>
+            {uploadPhase === "idle" ? (
+              <>
+                <Text style={styles.publishPlane}>✈</Text>
+                <Text style={styles.publishLabel}>发布</Text>
+              </>
+            ) : (
+              <Text style={styles.publishLabel}>{uploadProgress || "处理中..."}</Text>
+            )}
           </Pressable>
 
           <View style={styles.notice}>
@@ -275,6 +395,45 @@ const styles = StyleSheet.create({
   videoIcon: { fontSize: 32, opacity: 0.85 },
   videoPrimary: { fontSize: 14, fontWeight: "600", color: "#757575", textAlign: "center" },
   videoHint: { fontSize: 12, color: "#757575", textAlign: "center" },
+  videoPreviewCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    borderRadius: 16,
+    padding: 12,
+    gap: 12,
+  },
+  videoThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoThumbIcon: { fontSize: 24 },
+  videoInfo: { flex: 1, gap: 2 },
+  videoFileName: { fontSize: 14, fontWeight: "600", color: "#1a1a1a" },
+  videoMetaRow: { flexDirection: "row", gap: 12 },
+  videoMetaText: { fontSize: 12, color: "#757575" },
+  videoReadyLabel: { fontSize: 12, color: "#16a34a", fontWeight: "500" },
+  videoRemoveBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoRemoveIcon: { fontSize: 14, color: "#757575" },
+  repickBtn: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  repickText: { fontSize: 13, color: "#ff6b35", fontWeight: "500" },
   input: {
     backgroundColor: "#fff",
     borderWidth: 1,
@@ -321,6 +480,17 @@ const styles = StyleSheet.create({
   },
   tagText: { fontSize: 14, fontWeight: "600", color: "#757575" },
   tagTextOn: { color: "#ff6b35" },
+  uploadStatusCard: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  uploadingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  uploadingText: { fontSize: 14, color: "#757575" },
+  uploadErrorText: { fontSize: 14, color: "#dc2626", textAlign: "center" },
   publishBtn: {
     marginTop: 8,
     flexDirection: "row",

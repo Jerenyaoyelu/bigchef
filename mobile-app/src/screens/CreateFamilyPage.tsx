@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { track } from "../analytics/tracker";
+import { createFamily } from "../features/family/api/familyApi";
 
 export type HouseholdRelationChoice = "couple" | "roommates";
 
@@ -12,6 +13,7 @@ function generateInviteCode(): string {
 }
 
 export type CreateFamilyResult = {
+  familyId: string;
   inviteCode: string;
   familyName: string;
   relation: HouseholdRelationChoice;
@@ -28,12 +30,23 @@ export function CreateFamilyPage({ onBack, onCreated }: CreateFamilyPageProps) {
 
   const canSubmit = name.trim().length > 0;
 
-  function submit() {
+  async function submit() {
     if (!canSubmit) return;
-    const inviteCode = generateInviteCode();
     const familyName = name.trim();
     track("family_create_submit", { relation, nameLen: familyName.length });
-    onCreated({ inviteCode, familyName, relation });
+    try {
+      const family = await createFamily(familyName, relation);
+      onCreated({
+        familyId: family.id,
+        inviteCode: family.inviteCode,
+        familyName: family.name,
+        relation: family.householdRelation as HouseholdRelationChoice,
+      });
+    } catch {
+      // fallback: 用本地生成的邀请码
+      const inviteCode = generateInviteCode();
+      onCreated({ familyId: "", inviteCode, familyName, relation });
+    }
   }
 
   return (

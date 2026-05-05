@@ -1,5 +1,46 @@
-import { deleteJson, getJson, postJson } from "../../../api/http";
+import { deleteJson, getJson, postJson, uploadFormData } from "../../../api/http";
 import type { CommunityFeedTab, CommunityListResponse } from "../../../types/api";
+
+export type UploadInitResponse = {
+  assetId: string;
+  maxBytes: number;
+  maxDurationSec: number;
+  allowedMimeTypes: string[];
+  upload: { method: string; url: string; fieldName: string };
+};
+
+export type AssetStatusResponse = {
+  assetId: string;
+  transcodeStatus: string;
+  errorCode: string | null;
+  durationSec: number | null;
+  playbackUrl: string | null;
+  coverUrl: string | null;
+};
+
+export async function mediaUploadInit(payload: { fileName?: string; mimeType?: string }): Promise<UploadInitResponse> {
+  return postJson<UploadInitResponse>("/api/v2/community/media/upload-init", payload as Record<string, unknown>);
+}
+
+export async function mediaUploadBlob(assetId: string, fileUri: string, fileName: string, mimeType: string) {
+  const formData = new FormData();
+  formData.append("file", { uri: fileUri, name: fileName, type: mimeType } as unknown as Blob);
+  return uploadFormData<{ ok: boolean; assetId: string }>(
+    `/api/v2/community/media/${assetId}/blob`,
+    formData,
+  );
+}
+
+export async function mediaUploadComplete(assetId: string) {
+  return postJson<{ ok: boolean; assetId: string; transcodeStatus: string }>(
+    `/api/v2/community/media/${assetId}/upload-complete`,
+    {},
+  );
+}
+
+export async function mediaAssetStatus(assetId: string): Promise<AssetStatusResponse> {
+  return getJson<AssetStatusResponse>(`/api/v2/community/media/${assetId}/status`);
+}
 
 export async function fetchCommunityPosts(
   tab: CommunityFeedTab,
@@ -75,4 +116,19 @@ export function favoriteCommunityPost(postId: string) {
 
 export function unfavoriteCommunityPost(postId: string) {
   return deleteJson<{ favorited: boolean }>(`/api/v2/community/posts/${postId}/favorite`);
+}
+
+/**
+ * 批量获取 TOS 预签名 URL
+ * @param keys TOS 对象 key 列表
+ * @returns key → 签名 URL 映射
+ */
+export async function presignMediaKeys(keys: string[]): Promise<Record<string, string>> {
+  if (!keys.length) return {};
+  const params = new URLSearchParams();
+  params.set("keys", keys.join(","));
+  const res = await getJson<{ urls: Record<string, string> }>(
+    `/api/v2/community/media/presign?${params.toString()}`,
+  );
+  return res.urls ?? {};
 }

@@ -13,9 +13,10 @@ type RecommendSectionProps = {
   favoriteDishIds: string[];
   onToggleFavorite: (dish: { dishId: string; dishName: string }) => void;
   onOpenDish: (dish: DishDetailPrefetch) => void;
+  onRequireLogin?: () => boolean;
 };
 
-export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish }: RecommendSectionProps) {
+export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish, onRequireLogin }: RecommendSectionProps) {
   const likedDishIds = useUserFoodStore((s) => s.likedDishIds);
   const likeCountByDish = useUserFoodStore((s) => s.likeCountByDish);
   const toggleDishLike = useUserFoodStore((s) => s.toggleDishLike);
@@ -174,6 +175,7 @@ export function RecommendSection({ onError, favoriteDishIds, onToggleFavorite, o
 
   async function onAiBoost() {
     if (!result?.list?.length || !ingredients.length || aiBoostState === "loading") return;
+    if (onRequireLogin && !onRequireLogin()) return;
     setAiBoostState("loading");
     track("ai_recommend_triggered_manual", { total: result.total });
     onError("");

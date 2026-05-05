@@ -22,9 +22,25 @@ import { WeekMenuPage } from "./WeekMenuPage";
 import { useFamilySpaceStore } from "../store/familySpaceStore";
 import { useShoppingListStore } from "../store/shoppingListStore";
 import { useWeekMenuStore } from "../store/weekMenuStore";
+import { useSessionStore } from "../store/sessionStore";
 import { useUserFoodStore } from "../store/userFoodStore";
 
 type TabKey = "recommend" | "dish" | "community" | "profile";
+
+/**
+ * 需要登录的功能调用此函数；未登录返回 false 并跳转到登录页。
+ * 已登录返回 true。
+ */
+function requireLogin(
+  setActiveTab: (tab: TabKey) => void,
+  setForceLogin: (v: boolean) => void,
+): boolean {
+  const { accessToken } = useSessionStore.getState();
+  if (accessToken) return true;
+  setActiveTab("profile");
+  setForceLogin(true);
+  return false;
+}
 
 function TabLayer({
   visible,
@@ -77,6 +93,8 @@ export function HomeScreen() {
   const [shoppingListFromGathering, setShoppingListFromGathering] = useState(false);
   const [frequentDishesOpen, setFrequentDishesOpen] = useState(false);
   const [wishlistOpen, setWishlistOpen] = useState(false);
+  /** 强制 ProfileSection 进入登录页 */
+  const [forceLogin, setForceLogin] = useState(false);
   const favorites = useUserFoodStore((s) => s.favorites) ?? [];
   const recentViews = useUserFoodStore((s) => s.recentViews) ?? [];
   const toggleFavorite = useUserFoodStore((s) => s.toggleFavorite);
@@ -120,6 +138,10 @@ export function HomeScreen() {
               favoriteDishIds={favoriteDishIds}
               onToggleFavorite={toggleFavorite}
               onOpenDish={openDishFromRecommend}
+              onRequireLogin={() => {
+                if (!requireLogin(setActiveTab, setForceLogin)) return false;
+                return true;
+              }}
             />
           </TabLayer>
           <TabLayer visible={activeTab === "dish"}>
@@ -129,6 +151,10 @@ export function HomeScreen() {
               onToggleFavorite={toggleFavorite}
               onOpenDish={addRecentView}
               focusDishId={focusDishId}
+              onRequireLogin={() => {
+                if (!requireLogin(setActiveTab, setForceLogin)) return false;
+                return true;
+              }}
             />
           </TabLayer>
           <TabLayer visible={activeTab === "community"} scrollable={false}>
@@ -136,7 +162,12 @@ export function HomeScreen() {
               onError={setErrorMessage}
               onComposePress={() => {
                 setErrorMessage("");
+                if (!requireLogin(setActiveTab, setForceLogin)) return;
                 setCreatePostOpen(true);
+              }}
+              onRequireLogin={() => {
+                if (!requireLogin(setActiveTab, setForceLogin)) return false;
+                return true;
               }}
             />
           </TabLayer>
@@ -157,6 +188,7 @@ export function HomeScreen() {
               onClearRecentViews={clearRecentViews}
               onOpenFamilySpace={() => {
                 setErrorMessage("");
+                if (!requireLogin(setActiveTab, setForceLogin)) return;
                 if (useFamilySpaceStore.getState().joined) {
                   setFamilyDetailOpen(true);
                 } else {
@@ -165,8 +197,11 @@ export function HomeScreen() {
               }}
               onOpenGathering={() => {
                 setErrorMessage("");
+                if (!requireLogin(setActiveTab, setForceLogin)) return;
                 setGatheringOpen(true);
               }}
+              forceLogin={forceLogin}
+              onLoginHandled={() => setForceLogin(false)}
             />
           </TabLayer>
         </View>
@@ -216,10 +251,11 @@ export function HomeScreen() {
           <View style={[styles.detailOverlay, styles.familyJoinOverlay]}>
             <JoinFamilyPage
               onBack={() => setFamilyFlow("landing")}
-              onJoined={() => {
+              onJoined={(familyId) => {
                 track("family_join_success", {});
                 useWeekMenuStore.getState().reset();
                 useFamilySpaceStore.getState().setJoined({
+                  familyId: familyId || undefined,
                   spaceTitle: "情侣空间",
                   memberCount: 2,
                   plannedDaysThisWeek: 0,
@@ -239,6 +275,7 @@ export function HomeScreen() {
                 setFamilyInviteCode(result.inviteCode);
                 useWeekMenuStore.getState().reset();
                 useFamilySpaceStore.getState().setJoined({
+                  familyId: result.familyId || undefined,
                   spaceTitle: result.relation === "couple" ? "情侣空间" : "合租空间",
                   memberCount: 1,
                   plannedDaysThisWeek: 0,

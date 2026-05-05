@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { track } from "../../../analytics/tracker";
 import { DishResponse } from "../../../types/api";
 import { fetchDishById, fetchDishByName, fetchPopularDishes } from "../api/dishApi";
+import { fetchRecommendByIngredients } from "../../recommend/api/recommendApi";
 import { CookingStepsCard } from "./CookingStepsCard";
 import { VideoTutorialCard } from "./VideoTutorialCard";
 
@@ -12,15 +13,18 @@ type DishSectionProps = {
   onToggleFavorite: (dish: { dishId: string; dishName: string }) => void;
   onOpenDish: (dish: { dishId: string; dishName: string }) => void;
   focusDishId?: string | null;
+  onRequireLogin?: () => boolean;
 };
 
-export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish, focusDishId }: DishSectionProps) {
+export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpenDish, focusDishId, onRequireLogin }: DishSectionProps) {
   const [dishName, setDishName] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DishResponse | null>(null);
   const [isEmptyResult, setIsEmptyResult] = useState(false);
   const [popularDishes, setPopularDishes] = useState<string[]>(["可乐鸡翅", "西红柿炒鸡蛋", "宫保鸡丁", "红烧肉"]);
   const [videoRequestStateByDish, setVideoRequestStateByDish] = useState<Record<string, "idle" | "requested">>({});
+  const [aiSearching, setAiSearching] = useState(false);
+  const [aiResult, setAiResult] = useState<{ dishName: string; matchScore: number; cookTimeMinutes: number; source: string } | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -100,6 +104,34 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
     }
   }
 
+  async function onAiSearch() {
+    if (!dishName.trim()) return;
+    if (onRequireLogin && !onRequireLogin()) return;
+    setAiSearching(true);
+    onError("");
+    try {
+      track("dish_ai_search_submitted", { dishName });
+      const data = await fetchRecommendByIngredients([dishName.trim()], { aiBoost: true });
+      if (data.list.length > 0) {
+        const best = data.list[0]!;
+        setAiResult({
+          dishName: best.dishName,
+          matchScore: best.matchScore,
+          cookTimeMinutes: best.cookTimeMinutes,
+          source: data.source ?? "ai",
+        });
+        track("dish_ai_search_result", { total: data.total, source: data.source });
+      } else {
+        setAiResult(null);
+        onError("AI 暂未找到相关菜谱");
+      }
+    } catch (error) {
+      onError(`AI 搜索失败: ${(error as Error).message}`);
+    } finally {
+      setAiSearching(false);
+    }
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.headerWrap}>
@@ -125,6 +157,13 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
       >
         <Text style={styles.primaryButtonText}>{loading ? "查询中..." : "查询菜谱"}</Text>
       </Pressable>
+      <Pressable
+        style={[styles.aiButton, (!dishName.trim() || aiSearching) && styles.buttonDisabled]}
+        onPress={onAiSearch}
+        disabled={!dishName.trim() || aiSearching}
+      >
+        <Text style={styles.aiButtonText}>{aiSearching ? "AI 搜索中..." : "✨ AI 智能搜索"}</Text>
+      </Pressable>
       {canReset ? (
         <Pressable style={styles.resetButton} onPress={resetDishSearch} hitSlop={8}>
           <Text style={styles.resetButtonText}>重置查询</Text>
@@ -147,7 +186,21 @@ export function DishSection({ onError, favoriteDishIds, onToggleFavorite, onOpen
       {isEmptyResult && (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>暂未收录该菜谱</Text>
-          <Text style={styles.emptyDesc}>当前版本仅展示已入库菜谱，后续会接入 AI 自动生成并入库。</Text>
+          <Text style={styles.emptyDesc}>试试「AI 智能搜索」，让 AI 为你生成菜谱。</Text>
+        </View>
+      )}
+
+      {aiResult && (
+        <View style={styles.aiResultCard}>
+          <View style={styles.aiResultBadge}>
+            <Text style={styles.aiResultBadgeText}>AI 推荐</Text>
+          </View>
+          <Text style={styles.aiResultDishName}>{aiResult.dishName}</Text>
+          <View style={styles.aiResultMeta}>
+            <Text style={styles.aiResultMetaText}>◷ {aiResult.cookTimeMinutes}分钟</Text>
+            <Text style={styles.aiResultMetaText}>匹配度 {Math.round(aiResult.matchScore * 100)}%</Text>
+            <Text style={styles.aiResultMetaText}>来源: {aiResult.source}</Text>
+          </View>
         </View>
       )}
 
@@ -276,6 +329,37 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   primaryButtonText: { color: "#fff", fontWeight: "600", fontSize: 16 },
+  aiButton: {
+    backgroundColor: "#7c3aed",
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    shadowColor: "#7c3aed",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  aiButtonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+  aiResultCard: {
+    backgroundColor: "#f3e8ff",
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  aiResultBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#7c3aed",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  aiResultBadgeText: { color: "#fff", fontSize: 11, fontWeight: "600" },
+  aiResultDishName: { fontSize: 18, fontWeight: "600", color: "#1a1a1a" },
+  aiResultMeta: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  aiResultMetaText: { fontSize: 13, color: "#6b21a8" },
   buttonDisabled: { opacity: 0.5 },
   resetButton: {
     alignItems: "center",

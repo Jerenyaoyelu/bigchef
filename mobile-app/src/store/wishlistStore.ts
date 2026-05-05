@@ -2,11 +2,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import * as familyApi from "../features/family/api/familyApi";
+import { useFamilySpaceStore } from "./familySpaceStore";
 import type { MealKind, WeekdaySlot } from "./weekMenuStore";
 import { useWeekMenuStore } from "./weekMenuStore";
 
 export type WishlistItem = {
   id: string;
+  serverId?: string;
   dishName: string;
   /** 展示用简称，如「小明」「我」 */
   authorLabel: string;
@@ -51,6 +54,7 @@ type WishlistState = {
   removeItem: (id: string) => void;
   linkToWeekMenu: (id: string, day: WeekdaySlot, meal: MealKind) => void;
   unlinkFromWeekMenu: (id: string) => void;
+  loadFromServer: () => Promise<void>;
 };
 
 export const useWishlistStore = create<WishlistState>()(
@@ -74,13 +78,34 @@ export const useWishlistStore = create<WishlistState>()(
             },
           ],
         }));
+        // async sync to server
+        const familyId = useFamilySpaceStore.getState().familyId;
+        if (familyId) {
+          familyApi
+            .addWish(familyId, trimmed)
+            .then((wish) => {
+              set((s) => ({
+                items: s.items.map((i) =>
+                  i.id === id ? { ...i, serverId: wish.id } : i,
+                ),
+              }));
+            })
+            .catch(() => {});
+        }
       },
       removeItem: (id) => {
         const item = get().items.find((i) => i.id === id);
-        if (item?.linkedDay && item.linkedMeal) {
+        if (!item) return;
+        if (item.linkedDay && item.linkedMeal) {
           useWeekMenuStore.getState().setDish(item.linkedDay, item.linkedMeal, null);
         }
         set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
+        if (item.serverId) {
+          const familyId = useFamilySpaceStore.getState().familyId;
+          if (familyId) {
+            familyApi.deleteWish(familyId, item.serverId).catch(() => {});
+          }
+        }
       },
       linkToWeekMenu: (id, day, meal) => {
         const item = get().items.find((i) => i.id === id);
@@ -105,11 +130,35 @@ export const useWishlistStore = create<WishlistState>()(
           ),
         }));
       },
+      loadFromServer: async () => {
+        const familyId = useFamilySpaceStore.getState().familyId;
+        if (!familyId) return;
+        try {
+          const wishes = await familyApi.listWishes(familyId);
+          const items: WishlistItem[] = wishes.map((w) => ({
+            id: `w_${w.id}`,
+            serverId: w.id,
+            dishName: w.dishId,
+            authorLabel: w.userId,
+            createdAt: new Date(w.createdAt).getTime(),
+            linkedDay: (w.linkedDay as WeekdaySlot | null) ?? null,
+            linkedMeal: (w.linkedMeal as MealKind | null) ?? null,
+          }));
+          if (items.length > 0) set({ items });
+        } catch {
+          /* keep local */
+        }
+      },
     }),
     {
       name: "bigchef-wishlist",
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({ items: s.items }),
+      onRehydrateStorage: () => (_state, error) => {
+        if (!error) {
+          useWishlistStore.getState().loadFromServer();
+        }
+      },
     },
   ),
 );

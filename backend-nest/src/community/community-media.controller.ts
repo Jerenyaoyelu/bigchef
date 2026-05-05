@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -12,6 +13,7 @@ import type { Express } from "express";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
 import { BearerAuthGuard } from "../auth/bearer-auth.guard";
+import { OptionalBearerAuthGuard } from "../auth/optional-bearer-auth.guard";
 import { ReqUser, RequestUser } from "../auth/optional-user";
 import { CommunityMediaService } from "./community-media.service";
 import { MEDIA_MAX_BYTES } from "./media-upload.constants";
@@ -58,5 +60,18 @@ export class CommunityMediaController {
   @UseGuards(BearerAuthGuard)
   retry(@Param("assetId") assetId: string, @ReqUser() user: RequestUser) {
     return this.media.retry(assetId, user.userId);
+  }
+
+  /**
+   * 批量预签名：传入 TOS 对象 key 列表，返回签名 URL 映射
+   * GET /api/v2/community/media/presign?keys=square/xxx.mp4,square/yyy.jpg
+   */
+  @Get("presign")
+  @UseGuards(OptionalBearerAuthGuard)
+  async presign(@Query("keys") keysParam: string) {
+    if (!keysParam) return {};
+    const keys = keysParam.split(",").map((k) => k.trim()).filter(Boolean);
+    const urls = await this.media.presignKeys(keys);
+    return { urls };
   }
 }

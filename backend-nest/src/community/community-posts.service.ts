@@ -383,8 +383,10 @@ export class CommunityPostsService {
       dishId: post.dishId,
       tags: post.tags,
       status: post.status,
-      videoUrl: post.videoUrl,
-      coverUrl: post.coverUrl,
+      videoUrl: null,
+      coverUrl: null,
+      videoKey: post.videoUrl,   // DB 里存的就是 TOS key
+      coverKey: post.coverUrl,   // DB 里存的就是 TOS key
       videoStatus: post.videoStatus,
       durationSec: post.durationSec,
       likeCount: post.likeCount,

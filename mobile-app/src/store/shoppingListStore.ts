@@ -2,6 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import * as familyApi from "../features/family/api/familyApi";
+import { useFamilySpaceStore } from "./familySpaceStore";
+
 export type PurchaseMode = "single" | "twoStage";
 
 export type ShoppingPhase = 1 | 2;
@@ -35,6 +38,8 @@ export const SHOPPING_CATEGORY_LABEL: Record<ShoppingCategory, string> = {
 
 export type ShoppingItem = {
   id: string;
+  /** 服务端 item ID */
+  serverId?: string;
   label: string;
   checked: boolean;
   /** 两阶段采购时分组：第 1 次 / 第 2 次 */
@@ -82,32 +87,87 @@ export function groupItemsByCategorySorted(items: ShoppingItem[]): { category: S
 }
 
 type ShoppingListState = {
+  /** 当前服务端清单 ID */
+  serverListId: string | null;
   purchaseMode: PurchaseMode;
   items: ShoppingItem[];
   setPurchaseMode: (mode: PurchaseMode) => void;
   toggleChecked: (id: string) => void;
   markAtHome: (id: string) => void;
+  /** 从服务端生成采购清单（基于当前周菜单） */
+  generateFromServer: (menuWeekId: string) => Promise<void>;
+  /** 将勾选状态同步到服务端 */
+  syncCheckedToServer: () => void;
+  reset: () => void;
 };
 
 export const useShoppingListStore = create<ShoppingListState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
+      serverListId: null,
       purchaseMode: "single",
       items: DEFAULT_ITEMS.map((i) => ({ ...i })),
       setPurchaseMode: (mode) => set({ purchaseMode: mode }),
-      toggleChecked: (id) =>
+      toggleChecked: (id) => {
         set((s) => ({
           items: s.items.map((it) => (it.id === id ? { ...it, checked: !it.checked } : it)),
-        })),
-      markAtHome: (id) =>
+        }));
+        // 异步同步到服务端
+        get().syncCheckedToServer();
+      },
+      markAtHome: (id) => {
         set((s) => ({
           items: s.items.map((it) => (it.id === id ? { ...it, checked: true } : it)),
-        })),
+        }));
+        get().syncCheckedToServer();
+      },
+      generateFromServer: async (menuWeekId: string) => {
+        const familyId = useFamilySpaceStore.getState().familyId;
+        if (!familyId) return;
+        try {
+          const list = await familyApi.generateShoppingList(familyId, menuWeekId, "single");
+          const items: ShoppingItem[] = list.items.map((si, idx) => ({
+            id: si.id,
+            serverId: si.id,
+            label: si.displayName + (si.quantity ? ` ${si.quantity}` : ""),
+            checked: !!si.purchasedAt,
+            phase: (si.batchIndex ?? 0) < 1 ? 1 : 2,
+            category: (si.category as ShoppingCategory) ?? "other",
+          }));
+          set({ items, serverListId: list.id, purchaseMode: list.mode as PurchaseMode });
+        } catch {
+          /* keep local */
+        }
+      },
+      syncCheckedToServer: () => {
+        const { serverListId, items } = get();
+        if (!serverListId) return;
+        const familyId = useFamilySpaceStore.getState().familyId;
+        if (!familyId) return;
+        const patchItems = items
+          .filter((it) => it.serverId)
+          .map((it) => ({
+            id: it.serverId!,
+            purchased: it.checked,
+          }));
+        if (patchItems.length === 0) return;
+        familyApi.patchShoppingList(familyId, serverListId, patchItems).catch(() => {});
+      },
+      reset: () =>
+        set({
+          serverListId: null,
+          purchaseMode: "single",
+          items: DEFAULT_ITEMS.map((i) => ({ ...i })),
+        }),
     }),
     {
       name: "bigchef-shopping-list",
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ purchaseMode: s.purchaseMode, items: s.items }),
+      partialize: (s) => ({
+        serverListId: s.serverListId,
+        purchaseMode: s.purchaseMode,
+        items: s.items,
+      }),
     },
   ),
 );

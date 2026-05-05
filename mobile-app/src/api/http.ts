@@ -99,3 +99,36 @@ export async function patchJson<T>(path: string, body: Record<string, unknown>):
 export async function putJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
   return requestWithRetry<T>("PUT", path, body);
 }
+
+export async function uploadFormData<T>(path: string, formData: FormData): Promise<T> {
+  const apiBaseUrl = useAppConfigStore.getState().apiBaseUrl;
+  const url = `${apiBaseUrl}${path}`;
+  const { accessToken } = useSessionStore.getState();
+  const headers: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+
+  try {
+    return await handleResponse<T>(response);
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message === "RETRY_AFTER_REFRESH") {
+      const newToken = useSessionStore.getState().accessToken;
+      const retryHeaders: Record<string, string> = newToken
+        ? { Authorization: `Bearer ${newToken}` }
+        : {};
+      const retryResp = await fetch(url, {
+        method: "POST",
+        headers: retryHeaders,
+        body: formData,
+      });
+      return handleResponse<T>(retryResp);
+    }
+    throw e;
+  }
+}

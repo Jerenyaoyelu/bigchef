@@ -9,9 +9,11 @@ import { GatheringModule } from "./gathering/gathering.module";
 import { HealthController } from "./health.controller";
 import { ProfileModule } from "./profile/profile.module";
 import { RecommendModule } from "./recommend/recommend.module";
+import { StorageModule } from "./storage/storage.module";
 
 @Module({
   imports: [
+    StorageModule,
     AiModule,
     AuthModule,
     DatabaseModule,

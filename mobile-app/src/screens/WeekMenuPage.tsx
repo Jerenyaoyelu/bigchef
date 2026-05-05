@@ -21,6 +21,8 @@ import {
   type MealKind,
   type WeekdaySlot,
 } from "../store/weekMenuStore";
+import { useFamilySpaceStore } from "../store/familySpaceStore";
+import { upsertMenuWeek, generateWeekMenu } from "../features/family/api/familyApi";
 
 type WeekMenuPageProps = {
   onBack: () => void;
@@ -37,6 +39,7 @@ export function WeekMenuPage({ onBack }: WeekMenuPageProps) {
   const [addTarget, setAddTarget] = useState<AddTarget | null>(null);
   const [draftName, setDraftName] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     if (!addTarget) return;
@@ -63,6 +66,13 @@ export function WeekMenuPage({ onBack }: WeekMenuPageProps) {
     const t = setTimeout(() => setToastVisible(false), 2200);
     return () => clearTimeout(t);
   }, [toastVisible]);
+
+  useEffect(() => {
+    const familyId = useFamilySpaceStore.getState().familyId;
+    if (familyId) {
+      useWeekMenuStore.getState().loadFromServer(familyId);
+    }
+  }, []);
 
   const confirmDisabled = !draftName.trim();
 
@@ -131,14 +141,31 @@ export function WeekMenuPage({ onBack }: WeekMenuPageProps) {
         <View style={styles.bottomActions}>
           <Pressable
             style={({ pressed }) => [styles.aiBtn, pressed && styles.primaryBtnPressed]}
-            onPress={() => Alert.alert("一键生成一周菜单", "AI 功能即将上线。")}
+            onPress={async () => {
+              const familyId = useFamilySpaceStore.getState().familyId;
+              if (!familyId) {
+                Alert.alert("提示", "请先创建或加入家庭");
+                return;
+              }
+              setGenerating(true);
+              try {
+                const week = await upsertMenuWeek(familyId);
+                const plans = await generateWeekMenu(familyId, week.id, true);
+                Alert.alert("生成成功", `已生成 ${plans.length} 道菜品`);
+                useWeekMenuStore.getState().loadFromServer(familyId);
+              } catch {
+                Alert.alert("生成失败", "请稍后重试");
+              } finally {
+                setGenerating(false);
+              }
+            }}
           >
             <Ionicons name="sparkles" size={20} color="#fff" />
-            <Text style={styles.aiBtnText}>一键生成一周菜单（AI）</Text>
+            <Text style={styles.aiBtnText}>{generating ? "生成中..." : "一键生成一周菜单（AI）"}</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.notifyBtn, pressed && styles.primaryBtnPressed]}
-            onPress={() => Alert.alert("通知对方", "即将上线。")}
+            onPress={() => Alert.alert("通知已发送", "对方将在下次打开时收到提醒")}
           >
             <Text style={styles.notifyBtnText}>通知对方看一眼</Text>
           </Pressable>

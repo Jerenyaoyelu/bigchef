@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import * as familyApi from "../features/family/api/familyApi";
 import { useFamilySpaceStore } from "./familySpaceStore";
 
 export type WeekdaySlot = "mon" | "tue" | "wed" | "thu" | "fri";
@@ -107,15 +108,23 @@ function migratePersistedSlots(raw: unknown): Record<WeekdaySlot, DaySlots> {
 }
 
 type WeekMenuState = {
+  weekId: string | null;
   slots: Record<WeekdaySlot, DaySlots>;
+  loadingFromServer: boolean;
   setDish: (day: WeekdaySlot, meal: MealKind, name: string | null) => void;
+  /** 从后端加载周菜单（如有） */
+  loadFromServer: (familyId: string) => Promise<void>;
+  /** 同步单个菜品到后端 */
+  syncDishToServer: (day: WeekdaySlot, meal: MealKind, name: string, familyId: string) => Promise<void>;
   reset: () => void;
 };
 
 export const useWeekMenuStore = create<WeekMenuState>()(
   persist(
     (set, get) => ({
+      weekId: null,
       slots: emptySlots(),
+      loadingFromServer: false,
       setDish: (day, meal, name) => {
         const trimmed = name?.trim() || null;
         set(() => {
@@ -126,16 +135,57 @@ export const useWeekMenuStore = create<WeekMenuState>()(
           return { slots: next };
         });
       },
+      loadFromServer: async (familyId: string) => {
+        set({ loadingFromServer: true });
+        try {
+          const weeks = await familyApi.listMenuWeeks(familyId);
+          if (weeks.length > 0) {
+            const week = weeks[0]!;
+            const detail = await familyApi.getMenuWeek(familyId, week.id);
+            const next = emptySlots();
+            for (const plan of detail.mealPlans) {
+              const day = (plan.weekday ?? null) as WeekdaySlot | null;
+              const meal = (plan.mealKind ?? null) as MealKind | null;
+              const name = plan.dishName ?? plan.dishId;
+              if (day && meal && WEEKDAY_ORDER.includes(day) && MEAL_ORDER.includes(meal)) {
+                next[day][meal] = name;
+              }
+            }
+            set({ slots: next, weekId: week.id });
+            syncPlanStats(next);
+          }
+        } catch {
+          /* keep local */
+        } finally {
+          set({ loadingFromServer: false });
+        }
+      },
+      syncDishToServer: async (day, meal, name, familyId) => {
+        const { weekId } = get();
+        if (!weekId) return;
+        try {
+          await familyApi.addMealPlan(familyId, {
+            menuWeekId: weekId,
+            dishId: `custom_${name}`,
+            date: new Date().toISOString(),
+            dishName: name,
+            weekday: day,
+            mealKind: meal,
+          });
+        } catch {
+          /* ignore */
+        }
+      },
       reset: () => {
         const empty = emptySlots();
-        set({ slots: empty });
+        set({ slots: empty, weekId: null });
         syncPlanStats(empty);
       },
     }),
     {
       name: "bigchef-week-menu",
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ slots: s.slots }),
+      partialize: (s) => ({ slots: s.slots, weekId: s.weekId }),
       merge: (persistedState, currentState) => {
         const p = (persistedState ?? {}) as Partial<WeekMenuState>;
         if (p.slots === undefined) {
@@ -145,6 +195,7 @@ export const useWeekMenuStore = create<WeekMenuState>()(
           ...currentState,
           ...p,
           slots: migratePersistedSlots(p.slots),
+          weekId: (p as { weekId?: string | null }).weekId ?? null,
         };
       },
       onRehydrateStorage: () => (state) => {

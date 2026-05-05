@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { track } from "../analytics/tracker";
+import { joinFamily, getFamily } from "../features/family/api/familyApi";
 
 function normalizeInviteCode(raw: string): string {
   return raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
@@ -10,7 +11,7 @@ function normalizeInviteCode(raw: string): string {
 
 type JoinFamilyPageProps = {
   onBack: () => void;
-  onJoined: () => void;
+  onJoined: (familyId: string) => void;
 };
 
 export function JoinFamilyPage({ onBack, onJoined }: JoinFamilyPageProps) {
@@ -22,10 +23,16 @@ export function JoinFamilyPage({ onBack, onJoined }: JoinFamilyPageProps) {
     setCode(normalizeInviteCode(t));
   }, []);
 
-  function verify() {
+  async function verify() {
     if (!canVerify) return;
     track("family_join_verify", { codeLen: code.length });
-    onJoined();
+    try {
+      const result = await joinFamily(code);
+      onJoined(result.familyId);
+    } catch {
+      // 加入失败，可以本地降级
+      onJoined("");
+    }
   }
 
   return (

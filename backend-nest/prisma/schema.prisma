@@ -183,6 +183,10 @@ model CommunityMediaAsset {
   transcodeStatus    String          @default("pending")
   errorCode          String?
   durationSec        Int?
+  /// 转码后视频在 TOS 上的 key（如 square/uuid.mp4）
+  tosVideoKey        String?
+  /// 封面图在 TOS 上的 key（如 square/uuid.jpg）
+  tosCoverKey        String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   post               CommunityPost?

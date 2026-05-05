@@ -115,9 +115,16 @@ export type CommunityPost = {
   title: string | null;
   coverUrl: string | null;
   videoUrl: string | null;
+  /** TOS 对象 key（如 square/uuid.mp4），需要通过 presign 接口获取签名 URL */
+  videoKey: string | null;
+  /** TOS 对象 key（如 square/uuid.jpg），需要通过 presign 接口获取签名 URL */
+  coverKey: string | null;
   durationSec: number | null;
   likeCount: number;
   commentCount: number;
+  favoriteCount: number;
+  isLiked: boolean;
+  isFavorited: boolean;
   createdAt: string;
 };
 

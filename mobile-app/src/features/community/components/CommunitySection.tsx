@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,16 +9,26 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { track } from "../../../analytics/tracker";
 import { useAppConfigStore } from "../../../store/appConfigStore";
 import type { CommunityFeedTab, CommunityPost } from "../../../types/api";
-import { fetchCommunityPosts } from "../api/communityApi";
+import {
+  addCommunityComment,
+  favoriteCommunityPost,
+  fetchCommunityPosts,
+  likeCommunityPost,
+  presignMediaKeys,
+  unfavoriteCommunityPost,
+  unlikeCommunityPost,
+} from "../api/communityApi";
 
 type CommunitySectionProps = {
   onError: (message: string) => void;
   onComposePress: () => void;
+  onRequireLogin?: () => boolean;
 };
 
 function resolveMediaUrl(url: string | null | undefined): string | null {
@@ -41,13 +51,43 @@ function authorLabel(authorId: string) {
   return tail.length ? `厨友${tail}` : "厨友";
 }
 
-export function CommunitySection({ onError, onComposePress }: CommunitySectionProps) {
+export function CommunitySection({ onError, onComposePress, onRequireLogin }: CommunitySectionProps) {
   const [feedTab, setFeedTab] = useState<CommunityFeedTab>("latest");
   const [items, setItems] = useState<CommunityPost[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** TOS key → 签名 URL 缓存 */
+  const presignCache = useRef<Map<string, string>>(new Map());
+
+  /** 从帖子列表中收集 TOS key，批量签名并缓存 */
+  async function resolveSignedUrls(postList: CommunityPost[]) {
+    const keysNeeded: string[] = [];
+    for (const p of postList) {
+      if (p.videoKey && !presignCache.current.has(p.videoKey)) keysNeeded.push(p.videoKey);
+      if (p.coverKey && !presignCache.current.has(p.coverKey)) keysNeeded.push(p.coverKey);
+    }
+    if (!keysNeeded.length) return;
+    try {
+      const urls = await presignMediaKeys(keysNeeded);
+      for (const [key, url] of Object.entries(urls)) {
+        presignCache.current.set(key, url);
+      }
+      // 触发重新渲染：更新 items 引用
+      setItems((prev) => [...prev]);
+    } catch { /* 签名失败时 videoKey/coverKey 无法显示，但不阻塞 */ }
+  }
+
+  /** 获取媒体的最终 URL（优先签名URL，其次直接URL） */
+  function getMediaUrl(post: CommunityPost, kind: "video" | "cover"): string | null {
+    if (kind === "video") {
+      if (post.videoKey) return presignCache.current.get(post.videoKey) ?? null;
+      return post.videoUrl;
+    }
+    if (post.coverKey) return presignCache.current.get(post.coverKey) ?? null;
+    return post.coverUrl;
+  }
 
   const loadInitial = useCallback(async () => {
     onError("");
@@ -56,6 +96,7 @@ export function CommunitySection({ onError, onComposePress }: CommunitySectionPr
       const res = await fetchCommunityPosts(feedTab);
       setItems(res.items);
       setNextCursor(res.nextCursor);
+      void resolveSignedUrls(res.items);
     } catch (e) {
       onError(`社区加载失败: ${(e as Error).message}`);
       setItems([]);
@@ -76,6 +117,7 @@ export function CommunitySection({ onError, onComposePress }: CommunitySectionPr
       const res = await fetchCommunityPosts(feedTab);
       setItems(res.items);
       setNextCursor(res.nextCursor);
+      void resolveSignedUrls(res.items);
     } catch (e) {
       onError(`刷新失败: ${(e as Error).message}`);
     } finally {
@@ -89,6 +131,7 @@ export function CommunitySection({ onError, onComposePress }: CommunitySectionPr
     onError("");
     try {
       const res = await fetchCommunityPosts(feedTab, { cursor: nextCursor });
+      void resolveSignedUrls(res.items);
       setItems((prev) => {
         const seen = new Set(prev.map((p) => p.id));
         const merged = [...prev];
@@ -105,6 +148,67 @@ export function CommunitySection({ onError, onComposePress }: CommunitySectionPr
       onError(`加载更多失败: ${(e as Error).message}`);
     } finally {
       setLoadingMore(false);
+    }
+  }
+
+  function updatePost(postId: string, patch: Partial<CommunityPost>) {
+    setItems((prev) => prev.map((p) => (p.id === postId ? { ...p, ...patch } : p)));
+  }
+
+  async function handleLike(postId: string, isLiked: boolean) {
+    if (onRequireLogin && !onRequireLogin()) return;
+    track("community_post_like_tap", { postId });
+    updatePost(postId, {
+      isLiked: !isLiked,
+      likeCount: isLiked ? Math.max(0, (items.find((p) => p.id === postId)?.likeCount ?? 1) - 1) : (items.find((p) => p.id === postId)?.likeCount ?? 0) + 1,
+    });
+    try {
+      if (isLiked) {
+        await unlikeCommunityPost(postId);
+      } else {
+        await likeCommunityPost(postId);
+      }
+    } catch {
+      // revert on failure
+      updatePost(postId, {
+        isLiked,
+        likeCount: isLiked ? (items.find((p) => p.id === postId)?.likeCount ?? 0) + 1 : Math.max(0, (items.find((p) => p.id === postId)?.likeCount ?? 1) - 1),
+      });
+    }
+  }
+
+  async function handleFavorite(postId: string, isFavorited: boolean) {
+    if (onRequireLogin && !onRequireLogin()) return;
+    track("community_post_favorite_tap", { postId });
+    updatePost(postId, {
+      isFavorited: !isFavorited,
+      favoriteCount: isFavorited ? Math.max(0, (items.find((p) => p.id === postId)?.favoriteCount ?? 1) - 1) : (items.find((p) => p.id === postId)?.favoriteCount ?? 0) + 1,
+    });
+    try {
+      if (isFavorited) {
+        await unfavoriteCommunityPost(postId);
+      } else {
+        await favoriteCommunityPost(postId);
+      }
+    } catch {
+      // revert on failure
+      updatePost(postId, {
+        isFavorited,
+        favoriteCount: isFavorited
+          ? (items.find((p) => p.id === postId)?.favoriteCount ?? 0) + 1
+          : Math.max(0, (items.find((p) => p.id === postId)?.favoriteCount ?? 1) - 1),
+      });
+    }
+  }
+
+  async function handleComment(postId: string, content: string) {
+    if (onRequireLogin && !onRequireLogin()) return;
+    track("community_post_comment_submit", { postId });
+    try {
+      await addCommunityComment(postId, content);
+      updatePost(postId, { commentCount: (items.find((p) => p.id === postId)?.commentCount ?? 0) + 1 });
+    } catch (e) {
+      onError(`评论失败: ${(e as Error).message}`);
     }
   }
 
@@ -146,7 +250,16 @@ export function CommunitySection({ onError, onComposePress }: CommunitySectionPr
         <FlatList
           data={items}
           keyExtractor={(it) => it.id}
-          renderItem={({ item }) => <CommunityPostCard post={item} onPress={() => onCardPress(item)} />}
+          renderItem={({ item }) => (
+            <CommunityPostCard
+              post={item}
+              resolvedCoverUrl={getMediaUrl(item, "cover")}
+              onPress={() => onCardPress(item)}
+              onLikePress={() => handleLike(item.id, item.isLiked)}
+              onFavoritePress={() => handleFavorite(item.id, item.isFavorited)}
+              onCommentSubmit={(content) => handleComment(item.id, content)}
+            />
+          )}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff6b35" />}
           onEndReached={() => void onLoadMore()}
@@ -174,8 +287,34 @@ export function CommunitySection({ onError, onComposePress }: CommunitySectionPr
   );
 }
 
-function CommunityPostCard({ post, onPress }: { post: CommunityPost; onPress: () => void }) {
-  const coverUri = resolveMediaUrl(post.coverUrl);
+function CommunityPostCard({
+  post,
+  resolvedCoverUrl,
+  onPress,
+  onLikePress,
+  onFavoritePress,
+  onCommentSubmit,
+}: {
+  post: CommunityPost;
+  resolvedCoverUrl: string | null;
+  onPress: () => void;
+  onLikePress: () => void;
+  onFavoritePress: () => void;
+  onCommentSubmit: (content: string) => void;
+}) {
+  const [showCommentInput, setShowCommentInput] = useState(false);
+  const [commentText, setCommentText] = useState("");
+
+  const coverUri = resolvedCoverUrl ?? resolveMediaUrl(post.coverUrl);
+
+  function handleSubmitComment() {
+    const trimmed = commentText.trim();
+    if (!trimmed) return;
+    onCommentSubmit(trimmed);
+    setCommentText("");
+    setShowCommentInput(false);
+  }
+
   return (
     <Pressable style={styles.card} onPress={onPress}>
       <View style={styles.mediaWrap}>
@@ -205,16 +344,41 @@ function CommunityPostCard({ post, onPress }: { post: CommunityPost; onPress: ()
             <Text style={styles.authorName}>{authorLabel(post.authorId)}</Text>
           </View>
           <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <Text style={styles.statIcon}>👍</Text>
-              <Text style={styles.statNum}>{post.likeCount}</Text>
-            </View>
-            <View style={styles.stat}>
+            <Pressable style={styles.stat} onPress={onLikePress} hitSlop={8}>
+              <Text style={[styles.statIcon, post.isLiked && styles.statIconActive]}>
+                {post.isLiked ? "👍" : "👍"}
+              </Text>
+              <Text style={[styles.statNum, post.isLiked && styles.statNumActive]}>{post.likeCount}</Text>
+            </Pressable>
+            <Pressable style={styles.stat} onPress={() => setShowCommentInput((v) => !v)} hitSlop={8}>
               <Text style={styles.statIcon}>💬</Text>
               <Text style={styles.statNum}>{post.commentCount}</Text>
-            </View>
+            </Pressable>
+            <Pressable style={styles.stat} onPress={onFavoritePress} hitSlop={8}>
+              <Text style={[styles.statIcon, post.isFavorited && styles.statIconActive]}>
+                {post.isFavorited ? "⭐" : "☆"}
+              </Text>
+              <Text style={[styles.statNum, post.isFavorited && styles.statNumActive]}>{post.favoriteCount}</Text>
+            </Pressable>
           </View>
         </View>
+        {showCommentInput && (
+          <View style={styles.commentInputRow}>
+            <TextInput
+              style={styles.commentInput}
+              placeholder="写评论..."
+              placeholderTextColor="#aaa"
+              value={commentText}
+              onChangeText={setCommentText}
+              onSubmitEditing={handleSubmitComment}
+              returnKeyType="send"
+              autoFocus
+            />
+            <Pressable style={styles.commentSendBtn} onPress={handleSubmitComment}>
+              <Text style={styles.commentSendText}>发送</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     </Pressable>
   );
@@ -315,7 +479,31 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   stat: { flexDirection: "row", alignItems: "center", gap: 4 },
   statIcon: { fontSize: 14, opacity: 0.85 },
+  statIconActive: { opacity: 1 },
   statNum: { fontSize: 14, color: "#757575" },
+  statNumActive: { color: "#ff6b35", fontWeight: "600" },
+  commentInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  commentInput: {
+    flex: 1,
+    backgroundColor: "#f3f4f6",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: "#1a1a1a",
+  },
+  commentSendBtn: {
+    backgroundColor: "#ff6b35",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  commentSendText: { color: "#fff", fontSize: 14, fontWeight: "600" },
   emptyCard: {
     marginTop: 40,
     padding: 24,

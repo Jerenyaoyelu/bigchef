@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { rankedDishesFromSlots, rankAccent } from "../utils/frequentDishesStats";
 import { MealSlotPickerModal } from "./MealSlotPickerModal";
 import { useWeekMenuStore } from "../store/weekMenuStore";
 import type { MealKind, WeekdaySlot } from "../store/weekMenuStore";
+import { useFamilySpaceStore } from "../store/familySpaceStore";
+import { getDishStats } from "../features/family/api/familyApi";
 
 type FrequentDishesPageProps = {
   onBack: () => void;
@@ -16,6 +18,17 @@ export function FrequentDishesPage({ onBack }: FrequentDishesPageProps) {
   const setDish = useWeekMenuStore((s) => s.setDish);
 
   const ranked = useMemo(() => rankedDishesFromSlots(slots), [slots]);
+
+  const [serverStats, setServerStats] = useState<Array<{ dishId: string; doneCount: number }> | null>(null);
+  const familyId = useFamilySpaceStore((s) => s.familyId);
+
+  useEffect(() => {
+    if (!familyId) return;
+    getDishStats(familyId, 90).then(
+      (res) => setServerStats(res.items),
+      () => {},
+    );
+  }, [familyId]);
 
   const [pickForDish, setPickForDish] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -30,6 +43,17 @@ export function FrequentDishesPage({ onBack }: FrequentDishesPageProps) {
     },
     [pickForDish, setDish],
   );
+
+  const displayList = useMemo(() => {
+    if (serverStats && serverStats.length > 0) {
+      return serverStats.map((item, idx) => ({
+        name: item.dishId,
+        count: item.doneCount,
+        rank: idx + 1,
+      }));
+    }
+    return ranked;
+  }, [serverStats, ranked]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -58,13 +82,13 @@ export function FrequentDishesPage({ onBack }: FrequentDishesPageProps) {
           <Text style={styles.heroDesc}>统计你们最常做的菜，快速加入菜单</Text>
         </View>
 
-        {ranked.length === 0 ? (
+        {displayList.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>先在周菜单里填写菜品，统计会按菜名出现次数排序。</Text>
           </View>
         ) : (
           <View style={styles.cardList}>
-            {ranked.map((row) => (
+            {displayList.map((row) => (
               <View key={row.name} style={styles.statCard}>
                 <View style={styles.statLeft}>
                   <Text style={[styles.rankNum, { color: rankAccent(row.rank) }]}>#{row.rank}</Text>
