@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start:dev": "cross-env NODE_ENV=development ts-node-dev --respawn --transpile-only src/main.ts",
+    "ensure:ffmpeg": "node scripts/ensure-ffmpeg.mjs",
+    "start:dev": "node scripts/ensure-ffmpeg.mjs && cross-env NODE_ENV=development ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc -p tsconfig.json",
     "start": "cross-env NODE_ENV=production node dist/main.js",
     "start:staging": "cross-env NODE_ENV=staging node dist/main.js",
