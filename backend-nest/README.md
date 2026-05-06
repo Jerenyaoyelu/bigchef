@@ -12,13 +12,13 @@
    - `npm run prisma:push`
 5. (Optional) seed sample data:
    - `npm run prisma:seed`
-6. (Recommended) Community video uses **ffmpeg / ffprobe**. `npm run start:dev` runs `ensure:ffmpeg` first; it checks PATH and may install via **winget** (Windows) / **brew** (macOS) / **apt** (Linux). To skip: `SKIP_ENSURE_FFMPEG=1`. Manual: `npm run ensure:ffmpeg`.
+6. Community video uses **ffmpeg / ffprobe**，通过 npm 包 `ffmpeg-static` / `ffprobe-static` 提供，`npm install` 时自动下载，无需手动安装。
+   - 国内网络如下载失败，可用 npmmirror 镜像：`FFMPEG_BINARIES_URL=https://cdn.npmmirror.com/binaries/ffmpeg-static npm install`
 7. Start API:
    - `npm run start:dev`
    - staging run: `npm run start:staging`
    - production run: `npm run start`
 
-CI installs ffmpeg in the workflow before `npm ci` / build (see `.github/workflows/backend-ci.yml`).
 
 API base: `http://127.0.0.1:8000`
 

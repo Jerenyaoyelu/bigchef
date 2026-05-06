@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "ensure:ffmpeg": "node scripts/ensure-ffmpeg.mjs",
-    "start:dev": "node scripts/ensure-ffmpeg.mjs && cross-env NODE_ENV=development ts-node-dev --respawn --transpile-only src/main.ts",
+    "start:dev": "cross-env NODE_ENV=development ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc -p tsconfig.json",
     "start": "cross-env NODE_ENV=production node dist/main.js",
     "start:staging": "cross-env NODE_ENV=staging node dist/main.js",
@@ -21,6 +20,8 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "express": "^4.21.1",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
     "multer": "^1.4.5-lts.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"

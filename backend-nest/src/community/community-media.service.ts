@@ -8,6 +8,11 @@ import { PrismaService } from "../database/prisma.service";
 import { TosStorageService } from "../storage/tos-storage.service";
 import { MEDIA_ALLOWED_MIMES, MEDIA_MAX_BYTES, MEDIA_MAX_DURATION_SEC } from "./media-upload.constants";
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const ffmpegPath: string = require("ffmpeg-static");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const ffprobePath: string = require("ffprobe-static").path;
+
 const execFileAsync = promisify(execFile);
 
 @Injectable()
@@ -187,7 +192,7 @@ export class CommunityMediaService {
 
   private async probeDurationSeconds(filePath: string) {
     try {
-      const { stdout } = await execFileAsync("ffprobe", [
+      const { stdout } = await execFileAsync(ffprobePath, [
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=nw=1:nk=1",
@@ -197,15 +202,6 @@ export class CommunityMediaService {
       return Number.isFinite(v) ? v : null;
     } catch {
       return null;
-    }
-  }
-
-  private async ffmpegAvailable() {
-    try {
-      await execFileAsync("ffmpeg", ["-version"]);
-      return true;
-    } catch {
-      return false;
     }
   }
 
@@ -224,23 +220,18 @@ export class CommunityMediaService {
     }
 
     // ffmpeg 转码到本地临时文件
-    const hasFfmpeg = await this.ffmpegAvailable();
-    if (hasFfmpeg) {
-      await execFileAsync("ffmpeg", [
-        "-y", "-i", raw,
-        "-vf", "scale=-2:720",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        tempOut,
-      ]);
-      try {
-        await execFileAsync("ffmpeg", ["-y", "-ss", "00:00:02", "-i", raw, "-frames:v", "1", "-q:v", "2", tempCover]);
-      } catch {
-        await execFileAsync("ffmpeg", ["-y", "-ss", "00:00:01", "-i", tempOut, "-frames:v", "1", "-q:v", "2", tempCover]);
-      }
-    } else {
-      await fs.copyFile(raw, tempOut);
+    await execFileAsync(ffmpegPath, [
+      "-y", "-i", raw,
+      "-vf", "scale=-2:720",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+      "-c:a", "aac", "-b:a", "128k",
+      "-movflags", "+faststart",
+      tempOut,
+    ]);
+    try {
+      await execFileAsync(ffmpegPath, ["-y", "-ss", "00:00:02", "-i", raw, "-frames:v", "1", "-q:v", "2", tempCover]);
+    } catch {
+      await execFileAsync(ffmpegPath, ["-y", "-ss", "00:00:01", "-i", tempOut, "-frames:v", "1", "-q:v", "2", tempCover]);
     }
 
     const durationSec = duration != null ? Math.round(duration) : null;
